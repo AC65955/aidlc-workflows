@@ -411,6 +411,22 @@ describe("t27 aidlc-utility status", () => {
     expect(r.stdout).toContain("Awaiting your approval");
   }, 30000);
 
+  test("67b: status uses ASCII text for approved and skipped work", () => {
+    const p = bareProj();
+    util(["intent-create", "--scope", "bugfix"], p);
+    state(["advance", "workspace-scaffold"], p);
+    state(["advance", "workspace-detection"], p);
+    state(["advance", "state-init"], p);
+    const current = state(["get", "Current Stage"], p).stdout.trim();
+    state(["checkbox", `${current}=completed`], p);
+    state(["checkbox", "code-generation=skipped"], p);
+    const r = util(["status"], p);
+    expect(r.stdout).toContain("approved - ready to advance");
+    expect(r.stdout).toContain(" - 1 skipped");
+    expect(r.stdout).not.toContain("\u2014");
+    expect(r.stdout).not.toContain("\u2192");
+  }, 30000);
+
   test("68: status shows Revising and revision count for [R] stage", () => {
     const p = bareProj();
     util(["intent-create", "--scope", "bugfix"], p);
@@ -435,7 +451,7 @@ describe("t27 aidlc-utility doctor", () => {
     // Hook rows now derive from settings.json's wired hooks (the contract), so
     // the project needs a real .claude/ for those labels to render.
     const p = installedProj();
-    const r = util(["doctor"], p);
+    const r = util(["doctor", "--verbose"], p);
     expect(r.stdout).toContain("aidlc-statusline");
     expect(r.stdout).toContain("write-audit-log");
     expect(r.stdout).toContain("settings");
@@ -480,7 +496,7 @@ describe("t27 aidlc-utility doctor", () => {
   // hook). Each prints a "<hook>.ts present" line. A full install wires all 10.
   test("12b: doctor checks all 10 settings.json-wired hooks, including the 3 the old list skipped", () => {
     const p = installedProj();
-    const r = util(["doctor"], p);
+    const r = util(["doctor", "--verbose"], p);
     for (const hook of [
       "aidlc-write-audit-log",
       "aidlc-sync-workflow-state",
@@ -509,7 +525,7 @@ describe("t27 aidlc-utility doctor", () => {
     const p = installedProj((claudeDir) => {
       rmSync(join(claudeDir, "hooks", "aidlc-continue-workflow.ts"));
     });
-    const r = util(["doctor"], p);
+    const r = util(["doctor", "--verbose"], p);
     // The missing hook is named with the fail verdict, not silently absent.
     expect(r.stdout).toContain("fail  aidlc-continue-workflow.ts present");
     // And doctor exits non-zero (a failed check), so CI/scripts see the breakage.
@@ -531,13 +547,13 @@ describe("t27 aidlc-utility doctor", () => {
 
   test("59: doctor reports AWS_AIDLC_DEFAULT_SCOPE unset", () => {
     const p = bareProj();
-    const r = util(["doctor"], p); // env stripped of the var by util()
+    const r = util(["doctor", "--verbose"], p); // env stripped of the var by util()
     expect(r.stdout).toContain("AWS_AIDLC_DEFAULT_SCOPE (unset");
   });
 
   test("60: doctor reports AWS_AIDLC_DEFAULT_SCOPE=workshop as valid", () => {
     const p = bareProj();
-    const r = util(["doctor"], p, { AWS_AIDLC_DEFAULT_SCOPE: "workshop" });
+    const r = util(["doctor", "--verbose"], p, { AWS_AIDLC_DEFAULT_SCOPE: "workshop" });
     expect(r.stdout).toContain("AWS_AIDLC_DEFAULT_SCOPE=workshop (valid)");
   });
 
@@ -644,7 +660,8 @@ describe("t27 aidlc-utility scope-change", () => {
 
   test("16: scope-change poc->mvp updates Scope field to mvp", () => {
     const p = pocStateAuditProj();
-    util(["scope-change", "--scope", "mvp"], p);
+    const result = util(["scope-change", "--scope", "mvp"], p);
+    expect(result.stdout).toContain("Scope changed: poc -> mvp");
     expect(stateField(p, "Scope")).toBe("mvp");
     // STRONGER: the SCOPE_CHANGED audit row records New Scope = mvp.
     expect(auditField(auditPath(p), "SCOPE_CHANGED", "New Scope")).toBe("mvp");
@@ -760,7 +777,8 @@ describe("t27 aidlc-utility set-status", () => {
 describe("t27 aidlc-utility config-change", () => {
   test("38: config-change updates Depth to Minimal", () => {
     const p = stateAuditProj();
-    util(["config-change", "--depth", "minimal"], p);
+    const result = util(["config-change", "--depth", "minimal"], p);
+    expect(result.stdout).toContain("Depth changed: Standard -> Minimal");
     expect(stateField(p, "Depth")).toBe("Minimal");
   });
 
@@ -799,7 +817,8 @@ describe("t27 aidlc-utility config-change", () => {
 
   test("48: config-change updates Test Strategy to Minimal", () => {
     const p = stateAuditProj();
-    util(["config-change", "--test-strategy", "minimal"], p);
+    const result = util(["config-change", "--test-strategy", "minimal"], p);
+    expect(result.stdout).toContain("Test strategy changed: Standard -> Minimal");
     expect(stateField(p, "Test Strategy")).toBe("Minimal");
   });
 

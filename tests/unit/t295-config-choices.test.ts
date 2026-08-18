@@ -140,7 +140,9 @@ describe("t295 config choice dispatch", () => {
     for (const section of ["flags", "project"]) {
       const help = run(["config", section, "--help"], REPO_ROOT);
       expect(help.status).toBe(0);
-      expect(help.stdout).toContain(`aidlc config ${section}`);
+      expect(help.stdout).toContain(
+        `bun .claude/tools/aidlc.ts config ${section}`,
+      );
     }
     const project = temp("aidlc-t295-dispatch-");
     mkdirSync(join(project, ".git"));

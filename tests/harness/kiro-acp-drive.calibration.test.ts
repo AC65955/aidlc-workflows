@@ -63,7 +63,7 @@ describe("kiro-acp-drive calibration (known-answer)", () => {
       try {
         const r = await driveKiroAcp({
           projectDir: proj,
-          prompt: "/aidlc --doctor",
+          prompt: "/aidlc --doctor --verbose",
           timeoutMs: DRIVE_TIMEOUT_MS,
         });
         const doctorCall = r.toolCalls.find((t) => t.title.includes("aidlc-utility.ts doctor"));

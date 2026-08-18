@@ -115,7 +115,7 @@ interface CliResult {
 
 /** Spawn `bun aidlc-utility.ts doctor --project-dir <p>`. Mirrors `bun "$UTIL" doctor --project-dir "$PROJ"`. */
 function doctor(p: string): CliResult {
-  const res = spawnSync(BUN, [TOOL, "doctor", "--project-dir", p], {
+  const res = spawnSync(BUN, [TOOL, "doctor", "--verbose", "--project-dir", p], {
     encoding: "utf-8",
   });
   return {

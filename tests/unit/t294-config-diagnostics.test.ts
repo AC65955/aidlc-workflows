@@ -147,7 +147,9 @@ describe("t294 config section dispatch", () => {
     for (const section of ["models", "runtime", "providers", "trust"]) {
       const result = run(["config", section, "--help"], REPO_ROOT);
       expect(result.status, section).toBe(0);
-      expect(result.stdout, section).toContain(`aidlc config ${section}`);
+      expect(result.stdout, section).toContain(
+        `bun .claude/tools/aidlc.ts config ${section}`,
+      );
     }
     const project = temp("aidlc-t294-unknown-");
     mkdirSync(join(project, ".git"));

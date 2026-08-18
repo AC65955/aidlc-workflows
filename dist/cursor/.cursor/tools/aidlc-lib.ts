@@ -819,14 +819,19 @@ function terminalCommandFromPluginCommand(
   };
 }
 
-// The allowlisted trailing flags `--doctor` accepts (diagnostic export). Kept
+// The allowlisted trailing flags `--doctor` accepts. Kept
 // as a set here so the engine (parseNextFlags) and this classifier — the two
 // terminal-command deciders — stay byte-for-byte in agreement. A fixed
 // allowlist, so an arbitrary token can never ride the read-only path into the
 // tool.
-export const DOCTOR_EXPORT_FLAGS: ReadonlySet<string> = new Set(["--export", "--output"]);
+export const DOCTOR_EXPORT_FLAGS: ReadonlySet<string> = new Set([
+  "--export",
+  "--output",
+  "--verbose",
+]);
 
-// Collect the allowlisted `--doctor` export args (`--export`, `--output <dir>`)
+// Collect the allowlisted `--doctor` args (`--export`, `--output <dir>`,
+// `--verbose`)
 // from the token stream after the `--doctor` match, so the seam runs the same
 // command the engine's directive names. Mirrors parseNextFlags in the engine.
 function collectDoctorExportArgs(args: string[], doctorIdx: number): string[] {
@@ -910,9 +915,9 @@ export function classifyTerminalCommand(args: string[]): TerminalCommand | null 
     const a = args[i];
     if (READ_ONLY_FLAGS.has(a)) {
       const subcommand = a.replace(/^--/, "");
-      // --doctor carries allowlisted export args (--export, --output <dir>) so
-      // the documented export surface reaches the tool through the Kiro/Codex
-      // seam too, not only a direct invocation. Carried via `args` (v2's
+      // --doctor carries allowlisted args (--export, --output <dir>, --verbose)
+      // so the documented diagnostic surfaces reach the tool through the
+      // Kiro/Codex seam too, not only a direct invocation. Carried via `args` (v2's
       // forwarded-args field), mirrored by the engine's parseNextFlags.
       if (a === "--doctor") {
         const extra = collectDoctorExportArgs(args, i);

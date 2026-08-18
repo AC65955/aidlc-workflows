@@ -140,14 +140,18 @@ function runDoctorWithCodexVersion(version: string): {
     }
 
     const tool = join(project, ".codex", "tools", "aidlc-utility.ts");
-    const result = spawnSync(process.execPath, [tool, "doctor", "--project-dir", project], {
+    const result = spawnSync(
+      process.execPath,
+      [tool, "doctor", "--verbose", "--project-dir", project],
+      {
       cwd: project,
       encoding: "utf-8",
       env: {
         ...process.env,
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
       },
-    });
+      },
+    );
     return {
       status: result.status ?? -1,
       output: `${result.stdout ?? ""}${result.stderr ?? ""}`,

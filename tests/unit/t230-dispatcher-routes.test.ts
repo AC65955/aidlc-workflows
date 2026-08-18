@@ -1374,8 +1374,26 @@ describe("t230 dispatcher help and errors", () => {
         projectDir,
       );
       expect(sectionHelp.exitCode, section).toBe(0);
-      expect(sectionHelp.stdout.toString("utf-8"), section)
-        .toContain(`aidlc config ${section} [flags]`);
+      const sectionText = sectionHelp.stdout.toString("utf-8");
+      const copyInvocation = "bun .claude/tools/aidlc.ts";
+      expect(sectionText, section).toContain(
+        `${copyInvocation} config ${section} [flags]`,
+      );
+      expect(sectionText, section).toContain(
+        `${copyInvocation} config ${section} --show`,
+      );
+      expect(sectionText, section).toContain(
+        `Run '${copyInvocation} config ${section}`,
+      );
+      const compiledSection = viaImportedCompiledMain(
+        ["config", section, "--help"],
+        projectDir,
+      );
+      expect(compiledSection.exitCode, `compiled ${section}`).toBe(0);
+      expect(compiledSection.stdout.toString("utf-8")).toBe(
+        sectionText.replaceAll(copyInvocation, "aidlc"),
+      );
+      expect(compiledSection.stderr.toString("utf-8")).toBe("");
     }
     for (const flag of [
       "--pin",

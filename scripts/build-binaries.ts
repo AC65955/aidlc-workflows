@@ -512,7 +512,7 @@ function harnessProbeGate(
     delete env.AIDLC_RUNTIME_ROOT;
     const result = run(
       artifact,
-      ["doctor", "--project-dir", project],
+      ["doctor", "--verbose", "--project-dir", project],
       { cwd: project, env, timeoutMs: 30_000 },
     );
     const output = `${result.stdout}\n${result.stderr}`;

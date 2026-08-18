@@ -710,13 +710,16 @@ function parseNextFlags(args: string[]): ParsedFlags {
       flags.readOnly = a;
       continue;
     }
-    // Allowlisted trailing args for `--doctor`: `--export` (boolean) and
-    // `--output <dir>`. Recognised ONLY once `--doctor` has matched, so they
+    // Allowlisted trailing args for `--doctor`: `--export` and `--verbose`
+    // (booleans), plus `--output <dir>`. Recognised ONLY once `--doctor` has matched, so they
     // never leak into another read-only flag or into freeform intent text.
     // Kept as a fixed allowlist (mirrored by classifyTerminalCommand in
     // aidlc-lib.ts) so an arbitrary token can never ride the read-only path
     // into the tool. The value of `--output` is the following non-flag token.
-    if (flags.readOnly === "--doctor" && (a === "--export" || a === "--output")) {
+    if (
+      flags.readOnly === "--doctor" &&
+      (a === "--export" || a === "--output" || a === "--verbose")
+    ) {
       flags.readOnlyArgs = flags.readOnlyArgs ?? [];
       flags.readOnlyArgs.push(a);
       if (a === "--output") {
@@ -2586,7 +2589,8 @@ function handleNext(args: string[], projectDir: string | undefined): void {
   // harnessDir() so the directive names the right tree on every harness.
   if (flags.readOnly) {
     const sub = flags.readOnly.replace(/^--/, "");
-    // Carry the allowlisted trailing args (`--doctor --export [--output <dir>]`)
+    // Carry the allowlisted trailing args
+    // (`--doctor [--verbose] [--export] [--output <dir>]`)
     // into the named command so the documented export surface reaches the tool
     // through the real routing path, not just a direct invocation.
     const extra = flags.readOnlyArgs && flags.readOnlyArgs.length > 0

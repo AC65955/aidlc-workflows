@@ -505,6 +505,7 @@ describe("t238 build-binaries release builder", () => {
 
       const installedDoctor = spawnSync(installedBinary, [
         "doctor",
+        "--verbose",
         "--project-dir",
         project,
       ], {

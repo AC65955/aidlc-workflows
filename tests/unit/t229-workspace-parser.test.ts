@@ -355,7 +355,7 @@ describe("utility handlers and reservation chokepoints", () => {
 
       const switched = runUtility(projectDir, ["space", "switch", "My Space"]);
       expect(switched.status).toBe(0);
-      expect(switched.stdout).toContain("Active space");
+      expect(switched.stdout).toContain("Active space -> my-space");
       expect(readFileSync(join(projectDir, "aidlc", "active-space"), "utf-8").trim()).toBe("my-space");
     } finally {
       cleanup(projectDir);
@@ -382,7 +382,7 @@ describe("utility handlers and reservation chokepoints", () => {
         projectDir,
       ]);
       expect(r.status).toBe(0);
-      expect(r.stdout).toContain("Active intent");
+      expect(r.stdout).toContain("Active intent -> 260711-birth");
       expect(r.stderr).toBe("");
       expect(readFileSync(registry, "utf-8")).toBe(before);
       expect(readFileSync(join(projectDir, "aidlc", "spaces", "default", "intents", "active-intent"), "utf-8").trim()).toBe("260711-birth");
@@ -414,7 +414,7 @@ describe("utility handlers and reservation chokepoints", () => {
     try {
       mkdirSync(join(projectDir, "aidlc", "spaces", "list", "intents"), { recursive: true });
       seedIntent(projectDir, "birth", "260711-birth");
-      const r = runUtility(projectDir, ["doctor"]);
+      const r = runUtility(projectDir, ["doctor", "--verbose"]);
       expect(r.out).toContain(
         "Workspace names shadowing grammar verbs (advisory): space 'list', intent 'birth' - reachable via explicit switch; consider renaming.",
       );

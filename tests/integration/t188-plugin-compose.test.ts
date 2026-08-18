@@ -2663,7 +2663,11 @@ describe("t188 plugin compose — emit + compose the contribution seam", () => {
     require("node:fs").mkdirSync(hd, { recursive: true });
     writeFileSync(join(hd, "session-start.last"), "2026-07-08T00:00:00Z"); // heartbeat present
     writeFileSync(join(hd, "plugin-compose.drops"), `${dropLines.join("\n")}\n`);
-    const r = spawnSync(BUN, [join(proj, ".claude", "tools", "aidlc-utility.ts"), "doctor"], {
+    const r = spawnSync(BUN, [
+      join(proj, ".claude", "tools", "aidlc-utility.ts"),
+      "doctor",
+      "--verbose",
+    ], {
       cwd: proj, encoding: "utf-8", timeout: TIMEOUT_MS - 5_000,
       env: { ...process.env, CLAUDE_PROJECT_DIR: proj },
     });

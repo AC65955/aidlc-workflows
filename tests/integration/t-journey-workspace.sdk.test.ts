@@ -404,7 +404,7 @@ describe("t-journey-workspace (live SDK multi-repo·intent·space journey)", () 
           projectDir: root,
           answerScript: "default",
           timeoutMs: VERB_DRIVE_MS,
-          stopAfterToolResult: { resultIncludes: `Active space → ${TEAM_B_SLUG}` },
+          stopAfterToolResult: { resultIncludes: `Active space -> ${TEAM_B_SLUG}` },
         });
         expect(activeSpace(root)).toBe(TEAM_B_SLUG); // the active-space cursor moved
 
@@ -431,7 +431,7 @@ describe("t-journey-workspace (live SDK multi-repo·intent·space journey)", () 
           projectDir: root,
           answerScript: "default",
           timeoutMs: VERB_DRIVE_MS,
-          stopAfterToolResult: { resultIncludes: "Active space → default" },
+          stopAfterToolResult: { resultIncludes: "Active space -> default" },
         });
         expect(activeSpace(root)).toBe("default");
         // A's WORKFLOW STATE survived the round trip untouched (the cursor flip is

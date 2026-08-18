@@ -228,7 +228,7 @@ describe("t224 plugin selection - install chooses visible plugin surfaces", () =
     expect(table).toContain("| test-pro-integration |");
     expect(table).not.toContain("| code-generation |");
 
-    const doctor = runUtility(project, ["doctor"]);
+    const doctor = runUtility(project, ["doctor", "--verbose"]);
     expect(doctor.status).toBe(0);
     expect(doctor.stdout).toContain("Enabled plugins: test-pro");
 

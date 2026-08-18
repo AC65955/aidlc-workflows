@@ -160,7 +160,7 @@ describe("sdk-drive calibration (known-answer)", () => {
       const projA = setupIntegrationProject();
       const projB = setupIntegrationProject();
       try {
-        const rA = await driveAidlc("/aidlc --doctor", {
+        const rA = await driveAidlc("/aidlc --doctor --verbose", {
           projectDir: projA,
           timeoutMs: DRIVE_TIMEOUT_MS,
         });
@@ -201,7 +201,7 @@ describe("sdk-drive calibration (known-answer)", () => {
         // labels, counts, footer) must be identical. The structural asserts
         // above already prove the instrument carries the tool's verbatim bytes;
         // this proves it does so STABLY for the deterministic portion.
-        const rB = await driveAidlc("/aidlc --doctor", {
+        const rB = await driveAidlc("/aidlc --doctor --verbose", {
           projectDir: projB,
           timeoutMs: DRIVE_TIMEOUT_MS,
         });

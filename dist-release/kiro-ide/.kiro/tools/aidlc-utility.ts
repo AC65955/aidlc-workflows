@@ -319,7 +319,7 @@ function appendAuditEvent(
 // Previously hardcoded counts drifted as scopes evolved; sourcing from
 // the live mapping makes that impossible.
 
-const HELP_TEXT_HEAD = `AI-DLC — AI-Driven Development Life Cycle
+const HELP_TEXT_HEAD = `AI-DLC - AI-Driven Development Life Cycle
 
 Usage: /aidlc [command]
 
@@ -356,7 +356,7 @@ Utilities:
   --help            Show this help message
 
 Other:
-  <description>     Describe what to build — scope is auto-detected
+  <description>     Describe what to build - scope is auto-detected
   (no arguments)    Resume existing workflow, or start fresh if none exists
 
 Examples:
@@ -387,7 +387,7 @@ export function renderHelpText(): string {
     const ts = def.testStrategy
       ? `, ${def.testStrategy.toLowerCase()} test strategy`
       : "";
-    const desc = def.description ? ` — ${def.description}` : "";
+    const desc = def.description ? ` - ${def.description}` : "";
     const defaultMarker = name === defaultScope ? " (default)" : "";
     const countStr =
       execute === total ? `All ${total} stages` : `${execute} of ${total} stages`;
@@ -1103,7 +1103,7 @@ To get started:
     // hasn't called `advance` yet, so Current Stage still points here. Tell
     // the user honestly rather than showing "Running" on a completed stage.
     const displayName = currentEntry?.name ?? currentStage;
-    statusLine = `${displayName} approved — ready to advance`;
+    statusLine = `${displayName} approved - ready to advance`;
   }
 
   // Checkbox counts - filter to the EFFECTIVE plan when scope is known: the
@@ -1176,7 +1176,7 @@ Phase:          ${phase}
 Current Stage:  ${stageDisplay}
 Status:         ${statusLine}
 Active Agent:   ${activeAgent}
-Completion:     ${completed}/${total} stages (${pct}%)${skipped > 0 ? ` — ${skipped} skipped` : ""}
+Completion:     ${completed}/${total} stages (${pct}%)${skipped > 0 ? ` - ${skipped} skipped` : ""}
 
 Phase Progress:
 ${phaseProgress}
@@ -4630,7 +4630,7 @@ function printIntentListing(projectDir: string, asJson: boolean): void {
     out += `${marker} ${i.dirName ?? i.slug}  [${i.status}]\n`;
   }
   if (!active) {
-    out += `\n(no active intent — switch with /aidlc intent <name>)\n`;
+    out += `\n(no active intent - switch with /aidlc intent <name>)\n`;
   }
   process.stdout.write(out);
 }
@@ -4732,7 +4732,7 @@ function handleIntent(
   // orphan (registry-less) record is fail-safe. Best-effort throughout.
   const sid = readCurrentSessionId(projectDir);
   if (sid && match.uuid) writeSessionIntentUuid(projectDir, sid, match.uuid);
-  process.stdout.write(`Active intent → ${match.dirName} (space: ${space})\n`);
+  process.stdout.write(`Active intent -> ${match.dirName} (space: ${space})\n`);
 }
 
 // `/aidlc space` (list) · `/aidlc space <name>` (switch the active-space
@@ -4786,9 +4786,9 @@ function handleSpace(projectDir: string, positional: string[], flags: Record<str
   // own resolver; the CLI-native include is the ambient channel). Surgical
   // in-place rewrite of the pointer segment only — preserves all engine wiring.
   const repointed = repointHarnessIncludes(projectDir, target);
-  process.stdout.write(`Active space → ${target}\n`);
+  process.stdout.write(`Active space -> ${target}\n`);
   if (repointed.length > 0) {
-    process.stdout.write(`  repointed ${repointed.length} harness include(s) → ${target}\n`);
+    process.stdout.write(`  repointed ${repointed.length} harness include(s) -> ${target}\n`);
   }
 }
 
@@ -5319,7 +5319,7 @@ function handleScopeChange(projectDir: string, flags: Record<string, string>): v
   }
 
   process.stdout.write(
-    `Scope changed: ${oldScope} → ${newScope}
+    `Scope changed: ${oldScope} -> ${newScope}
 Stages in scope: ${executeStages.length} (${deltaStr})
 Approval gates: ${gates}
 Depth: ${effectiveDepth}
@@ -5690,14 +5690,14 @@ function handleConfigChange(projectDir: string, flags: Record<string, string>): 
   if (newDepth !== undefined) {
     process.stdout.write(
       depthChanging
-        ? `Depth changed: ${oldDepth} → ${newDepth}\n`
+        ? `Depth changed: ${oldDepth} -> ${newDepth}\n`
         : `Depth is already ${newDepth}\n`
     );
   }
   if (newStrategy !== undefined) {
     process.stdout.write(
       strategyChanging
-        ? `Test strategy changed: ${oldStrategy} → ${newStrategy}\n`
+        ? `Test strategy changed: ${oldStrategy} -> ${newStrategy}\n`
         : `Test strategy is already ${newStrategy}\n`
     );
   }
@@ -5705,7 +5705,7 @@ function handleConfigChange(projectDir: string, flags: Record<string, string>): 
     const display = storedReview === "" ? "adversarial (stage defaults)" : storedReview;
     process.stdout.write(
       reviewChanging
-        ? `Review override changed: ${oldReview || "none"} → ${display}\n`
+        ? `Review override changed: ${oldReview || "none"} -> ${display}\n`
         : `Review override is already ${display}\n`
     );
   }

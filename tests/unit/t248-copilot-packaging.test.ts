@@ -197,6 +197,7 @@ describe("t248 dist/copilot packaging parity + shell shape", () => {
         [
           join(project, ".aidlc", "tools", "aidlc-utility.ts"),
           "doctor",
+          "--verbose",
           "--project-dir",
           project,
         ],
@@ -236,6 +237,7 @@ describe("t248 dist/copilot packaging parity + shell shape", () => {
           [
             join(project, ".aidlc", "tools", "aidlc-utility.ts"),
             "doctor",
+            "--verbose",
             "--project-dir",
             project,
           ],

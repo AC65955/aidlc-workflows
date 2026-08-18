@@ -111,7 +111,7 @@ describe("t22 /aidlc --doctor (SDK port)", () => {
       try {
         const auditBefore = readAuditEvents(proj) ?? [];
 
-        const r = await driveAidlc("/aidlc --doctor", {
+        const r = await driveAidlc("/aidlc --doctor --verbose", {
           projectDir: proj,
           timeoutMs: DRIVE_TIMEOUT_MS,
           stopAfterToolResult: STOP_AFTER_DOCTOR,

@@ -732,9 +732,9 @@ The native diagnostic form is
 [--offline]`. `--export` writes a redacted diagnostic bundle, with
 `--output <directory>` overriding its default project location; export output
 is additional to the selected live-report mode. Human output groups Machine,
-Project, and Framework integrity checks. Framework details collapse by default
-and expand with `--verbose`. Warnings are advisory and exit 0; any failed check
-exits 1.
+Project, and Framework integrity checks. Every section keeps warning/failure
+rows visible and collapses healthy rows by default; `--verbose` expands every
+check. Warnings are advisory and exit 0; any failed check exits 1.
 
 `--no-color` and `NO_COLOR` disable ANSI output. `--project-dir <path>` selects
 project context without changing the shell directory. Destructive operations

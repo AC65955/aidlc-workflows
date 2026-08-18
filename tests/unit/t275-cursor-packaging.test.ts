@@ -227,7 +227,13 @@ describe("t275 dist/cursor packaging parity + shell shape", () => {
       cpSync(CURSOR_ROOT, project, { recursive: true });
       const r = spawnSync(
         "bun",
-        [join(project, ".cursor", "tools", "aidlc-utility.ts"), "doctor", "--project-dir", project],
+        [
+          join(project, ".cursor", "tools", "aidlc-utility.ts"),
+          "doctor",
+          "--verbose",
+          "--project-dir",
+          project,
+        ],
         {
           cwd: project,
           encoding: "utf-8",

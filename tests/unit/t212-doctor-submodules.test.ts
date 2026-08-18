@@ -36,7 +36,7 @@ function proj(): string {
 
 /** `bun UTIL doctor --project-dir <proj>` captured 2>&1, exit code swallowed. */
 function runDoctor(proj: string): string {
-  const res = spawnSync(BUN, [UTIL, "doctor", "--project-dir", proj], {
+  const res = spawnSync(BUN, [UTIL, "doctor", "--verbose", "--project-dir", proj], {
     encoding: "utf-8",
     env: { ...process.env },
   });

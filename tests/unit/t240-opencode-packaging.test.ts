@@ -285,7 +285,13 @@ describe("t240 dist/opencode packaging parity + shell shape", () => {
       renameSync(join(project, "opencode.json"), join(project, "opencode.jsonc"));
       const r = spawnSync(
         "bun",
-        [join(project, ".aidlc", "tools", "aidlc-utility.ts"), "doctor", "--project-dir", project],
+        [
+          join(project, ".aidlc", "tools", "aidlc-utility.ts"),
+          "doctor",
+          "--verbose",
+          "--project-dir",
+          project,
+        ],
         {
           cwd: project,
           encoding: "utf-8",

@@ -27,7 +27,10 @@ import {
 } from "./aidlc-update.ts";
 import { collectPluginStatus } from "./aidlc-plugin.ts";
 import { scanWindowsUninstallJournals } from "./aidlc-windows-uninstall.ts";
-import { discoverProjectHarnesses } from "./aidlc-runtime-paths.ts";
+import {
+  aidlcInvocation,
+  discoverProjectHarnesses,
+} from "./aidlc-runtime-paths.ts";
 import {
   isModelHarness,
   modelPolicyDoctorIssues,
@@ -216,28 +219,38 @@ function humanReport(
     return row;
   };
   const findings = analysis.findings.filter((finding) => finding.severity !== "info");
+  const findingRows = findings.map((finding) =>
+    `  warn  [${finding.id}] ${finding.summary}\n` +
+    `        fix: ${finding.remedy ?? fallbackFix}\n`
+  );
+  const renderSection = (
+    checks: readonly DoctorCheck[],
+    extraAttentionRows: readonly string[] = [],
+  ): string => {
+    if (verbose) {
+      return `${checks.map(renderCheck).join("")}${extraAttentionRows.join("")}`;
+    }
+    const passing = checks.filter((check) => status(check) === "ok");
+    const attention = checks.filter((check) => status(check) !== "ok");
+    let rows = attention.map(renderCheck).join("");
+    rows += extraAttentionRows.join("");
+    if (passing.length > 0) {
+      const allClean = attention.length === 0 && extraAttentionRows.length === 0;
+      rows += `  ok    ${allClean ? "all " : ""}${passing.length} checks passed\n`;
+    }
+    return rows;
+  };
   let output = "AI-DLC doctor\n\n";
   output += "Machine\n";
-  for (const check of machine) output += renderCheck(check);
+  output += renderSection(machine);
   output += `\nProject${
     harness
       ? ` (${harness.harnessDir}, ${productNames[harness.distribution] ?? harness.distribution})`
       : ""
   }\n`;
-  for (const check of project) output += renderCheck(check);
-  for (const finding of findings) {
-    output += `  warn  [${finding.id}] ${finding.summary}\n`;
-    output += `        fix: ${finding.remedy ?? fallbackFix}\n`;
-  }
+  output += renderSection(project, findingRows);
   output += "\nFramework integrity\n";
-  const frameworkClean = framework.every((check) =>
-    check.pass && check.severity !== "warn"
-  );
-  if (!verbose && frameworkClean) {
-    output += `  ok    all checks passed (${framework.length} framework checks)\n`;
-  } else {
-    for (const check of framework) output += renderCheck(check);
-  }
+  output += renderSection(framework);
   const visibleWarnings = report.warnings + findings.length;
   output += `\n${report.failed} problem${report.failed === 1 ? "" : "s"}, ${
     visibleWarnings
@@ -247,6 +260,9 @@ function humanReport(
   }
   if (report.failed === 0 && visibleWarnings === 0) {
     output += "Your install is ready.\n";
+  }
+  if (!verbose) {
+    output += `Run '${aidlcInvocation()} doctor --verbose' to see every check.\n`;
   }
   return output;
 }

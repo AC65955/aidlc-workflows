@@ -399,18 +399,23 @@ fails; the full report writes to stdout in both cases.
 AI-DLC doctor
 
 Machine
-  ok    bun installed (required for CLI tools and hooks)
+  warn  Runtime hook PATH: bun is interactive-only at /home/user/.bun/bin/bun
+        fix: Install Bun, then add ~/.bun/bin to the login-independent environment used by the harness, not only .zshrc or .bash_profile.
+  warn  Update: update check unavailable while offline
+        fix: run `aidlc update --check`
+  ok    4 checks passed
 
 Project (.claude, Claude Code)
-  ok    settings.json present
-  warn  Hook heartbeats: not yet fired
-        fix: Run the first workflow stage to populate hook heartbeats
+  warn  Instruction file: block or file missing - run `aidlc config`
+        fix: run `aidlc config`
+  ok    43 checks passed
 
 Framework integrity
-  ok    all checks passed (12 framework checks)
+  ok    all 12 checks passed
 
-0 problems, 1 warning.
+0 problems, 3 warnings.
 Warnings are advisory - if everything works, ignore them.
+Run 'aidlc doctor --verbose' to see every check.
 ```
 
 ### Fixing failures

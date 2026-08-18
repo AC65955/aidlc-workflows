@@ -526,6 +526,15 @@ describe("t243 doctor --export diagnostic exporter (#575)", () => {
     expect(dir.message).toContain("doctor --export --output");
     expect(dir.message).toContain(outDir);
 
+    const verbose = spawnSync(BUN, [ORCH, "next", "--doctor", "--verbose"], {
+      encoding: "utf-8",
+      env: { ...process.env },
+    });
+    expect(verbose.status).toBe(0);
+    const verboseDir = JSON.parse((verbose.stdout ?? "").trim());
+    expect(verboseDir.kind).toBe("print");
+    expect(verboseDir.message).toContain("doctor --verbose");
+
     // A plain `--doctor` (no export) names the doctor command WITHOUT --export.
     const plain = spawnSync(BUN, [ORCH, "next", "--doctor"], {
       encoding: "utf-8",
@@ -538,12 +547,17 @@ describe("t243 doctor --export diagnostic exporter (#575)", () => {
     expect(plainDir.message).not.toContain("--export");
   });
 
-  test("9: KIRO PARITY — classifyTerminalCommand carries the same allowlisted export args", () => {
+  test("9: KIRO PARITY - classifyTerminalCommand carries the same allowlisted doctor args", () => {
     const withArgs = classifyTerminalCommand(["--doctor", "--export", "--output", "/tmp/x"]);
     expect(withArgs).toEqual({
       subcommand: "doctor",
       source: "read-only-flag",
       args: ["--export", "--output", "/tmp/x"],
+    });
+    expect(classifyTerminalCommand(["--doctor", "--verbose"])).toEqual({
+      subcommand: "doctor",
+      source: "read-only-flag",
+      args: ["--verbose"],
     });
 
     // A bare `--doctor` carries no args (undefined, not an empty array).

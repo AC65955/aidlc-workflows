@@ -852,7 +852,7 @@ describe("t164 doctor readiness against the shipped shell", () => {
     // idempotent — memory/ already exists from the seed.)
     mkdirSync(join(proj, ".claude"), { recursive: true });
     mkdirSync(join(proj, "aidlc", "spaces", "default", "memory"), { recursive: true });
-    const r = util(["doctor"]);
+    const r = util(["doctor", "--verbose"]);
     expect(r.out).toContain("workspace shell ready");
     // The readiness row must NOT reference the retired --init.
     expect(r.out).not.toContain("run `/aidlc --init`");

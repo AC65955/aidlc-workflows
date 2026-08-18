@@ -70,6 +70,7 @@ import {
   renderStageTable,
 } from "./aidlc-utility.ts";
 import {
+  aidlcInvocation,
   discoverProjectHarnesses,
   isCompiledExecutable,
 } from "./aidlc-runtime-paths.ts";
@@ -450,11 +451,12 @@ function validateModelsArgs(argv: readonly string[]): string | null {
 }
 
 function modelPolicyHelp(): string {
+  const invoke = aidlcInvocation();
   return [
     "Choose model and effort policy for each agent",
     "",
     "USAGE",
-    "  aidlc config models [flags]",
+    `  ${invoke} config models [flags]`,
     "",
     "Pins bind in both directions: a pinned agent stays pinned if the session later moves to a larger model.",
     "Judgment and Writing up inherit by default; the balanced reviewer baseline is the disclosed shipped step-down.",
@@ -484,9 +486,9 @@ function modelPolicyHelp(): string {
     "  --yes",
     "",
     "EXAMPLE",
-    "  aidlc config models --preset thorough --project --yes",
+    `  ${invoke} config models --preset thorough --project --yes`,
     "",
-    "Run 'aidlc config models --show' to inspect the effective result.",
+    `Run '${invoke} config models --show' to inspect the effective result.`,
   ].join("\n");
 }
 
@@ -907,6 +909,7 @@ function validateDiagnosticArgs(
 }
 
 function diagnosticHelp(section: DiagnosticSection): string {
+  const invoke = aidlcInvocation();
   const common = [
     "Inspection:",
     "  --show [--json]",
@@ -951,16 +954,16 @@ function diagnosticHelp(section: DiagnosticSection): string {
       : "Review host trust and command allowlists",
     "",
     "USAGE",
-    `  aidlc config ${section} [flags]`,
+    `  ${invoke} config ${section} [flags]`,
     "",
     ...specific,
     "",
     ...common,
     "",
     "EXAMPLE",
-    `  aidlc config ${section} --show`,
+    `  ${invoke} config ${section} --show`,
     "",
-    `Run 'aidlc config ${section} --check' for a non-writing verification.`,
+    `Run '${invoke} config ${section} --check' for a non-writing verification.`,
   ].join("\n");
 }
 
@@ -1872,6 +1875,7 @@ function validateChoiceArgs(
 }
 
 function choiceHelp(section: ChoiceSection): string {
+  const invoke = aidlcInvocation();
   const specific = section === "flags"
     ? [
         "Recorded flags:",
@@ -1905,7 +1909,7 @@ function choiceHelp(section: ChoiceSection): string {
       : "Choose plugins, MCP servers, and shell completions",
     "",
     "USAGE",
-    `  aidlc config ${section} [flags]`,
+    `  ${invoke} config ${section} [flags]`,
     "",
     ...specific,
     "",
@@ -1919,9 +1923,9 @@ function choiceHelp(section: ChoiceSection): string {
     "  --yes",
     "",
     "EXAMPLE",
-    `  aidlc config ${section} --show`,
+    `  ${invoke} config ${section} --show`,
     "",
-    `Run 'aidlc config ${section} --check' for a non-writing verification.`,
+    `Run '${invoke} config ${section} --check' for a non-writing verification.`,
   ].join("\n");
 }
 

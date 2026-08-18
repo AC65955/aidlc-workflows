@@ -495,15 +495,24 @@ describe("t37 aidlc-utility doctor — graph-level checks", () => {
     expect(r.out).toContain("Warnings are advisory - if everything works, ignore them.");
   });
 
-  test("17c: default doctor collapses clean framework rows and verbose expands them", () => {
+  test("17c: default doctor collapses healthy rows in every section and verbose expands them", () => {
     const p = track(setupIntegrationProject());
     const concise = doctorDefault(p);
     expect(concise.status).toBe(0);
+    expect(concise.out).toContain("Machine");
+    expect(concise.out).toContain("Project (.claude, Claude Code)");
     expect(concise.out).toContain("Framework integrity");
-    expect(concise.out).toMatch(/ok\s+all checks passed \(\d+ framework checks\)/);
+    expect(concise.out).toMatch(/ok\s+\d+ checks passed/);
+    expect(concise.out).toMatch(/ok\s+all \d+ checks passed/);
+    expect(concise.out).not.toContain("aidlc-write-audit-log.ts present");
     expect(concise.out).not.toContain("Schema validation:");
+    expect(concise.out).toContain(
+      "Run 'bun .claude/tools/aidlc.ts doctor --verbose' to see every check.",
+    );
     const expanded = doctor(p);
+    expect(expanded.out).toContain("aidlc-write-audit-log.ts present");
     expect(expanded.out).toContain("Schema validation:");
+    expect(expanded.out).not.toContain("to see every check.");
   });
 
   // Hook-drop probe (issue: recordHookDrop wrote .drops telemetry for doctor,

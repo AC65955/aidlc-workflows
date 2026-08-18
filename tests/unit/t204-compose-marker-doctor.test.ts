@@ -66,7 +66,7 @@ interface DoctorResult {
 }
 
 function runDoctor(proj: string): DoctorResult {
-  const res = spawnSync(BUN, [UTIL, "doctor", "--project-dir", proj], {
+  const res = spawnSync(BUN, [UTIL, "doctor", "--verbose", "--project-dir", proj], {
     encoding: "utf-8",
     env: { ...process.env },
   });
