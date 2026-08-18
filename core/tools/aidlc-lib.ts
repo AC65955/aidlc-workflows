@@ -7,6 +7,19 @@ import { fileURLToPath } from "node:url";
 import {
   resolveHarnessPath,
 } from "./aidlc-runtime-paths.ts";
+import {
+  _resetSettingsCacheForTests,
+  RECORDABLE_PROJECT_BYPASSES,
+  resolveAidlcSettings,
+  type ProjectFlagsRecord,
+  type RecordableProjectBypass,
+} from "./aidlc-settings.ts";
+export {
+  normalizeProjectFlagsRecord,
+  RECORDABLE_PROJECT_BYPASSES,
+  type ProjectFlagsRecord,
+  type RecordableProjectBypass,
+} from "./aidlc-settings.ts";
 // Type-only import for the lazy-loaded aidlc-graph.ts dependency. The
 // runtime require() below avoids the circular import (aidlc-graph.ts
 // imports loadScopeMapping/loadStageGraph from this file). Type-only
@@ -229,105 +242,10 @@ const KNOWN_RULES_SUBDIR: Record<string, string> = {
   ".cursor": "rules",
 };
 
-export const RECORDABLE_PROJECT_BYPASSES = [
-  "AIDLC_SKIP_ARTIFACT_GUARD",
-  "AIDLC_SKIP_HUMAN_PRESENCE_GUARD",
-  "AIDLC_SKIP_REVISION_BACKSTOP",
-  "AIDLC_SKIP_SUMMARY_CONFIRMATION_GUARD",
-  "AIDLC_DISABLE_ENSEMBLE_EVIDENCE",
-  "AIDLC_DISABLE_PLAN_APPROVAL_GUARD",
-  "AIDLC_DISABLE_REVIEWER_SCOPE_HOOK",
-  "AIDLC_DISABLE_REVIEW_FREEZE_HOOK",
-  "AIDLC_DISABLE_USAGE_TRACKING",
-] as const;
-
-export type RecordableProjectBypass =
-  (typeof RECORDABLE_PROJECT_BYPASSES)[number];
-
-export type ProjectFlagsRecord = {
-  schemaVersion: 1;
-  defaultScope?: string;
-  swarm?: boolean;
-  hookDebug?: boolean;
-  sensorTimeoutMs?: number;
-  bypasses?: RecordableProjectBypass[];
-};
-
-const PROJECT_FLAG_KEYS = new Set([
-  "schemaVersion",
-  "defaultScope",
-  "swarm",
-  "hookDebug",
-  "sensorTimeoutMs",
-  "bypasses",
-]);
-
-export function normalizeProjectFlagsRecord(
-  value: unknown,
-  where = "flags",
-): ProjectFlagsRecord | null {
-  if (value === undefined || value === null) return null;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${where} must be an object`);
-  }
-  const record = value as Record<string, unknown>;
-  if (record.schemaVersion !== 1) {
-    throw new Error(`${where}.schemaVersion must be 1`);
-  }
-  const unknown = Object.keys(record).filter((key) => !PROJECT_FLAG_KEYS.has(key));
-  if (unknown.length > 0) {
-    throw new Error(`${where} has unknown key(s): ${unknown.join(", ")}`);
-  }
-  const out: ProjectFlagsRecord = { schemaVersion: 1 };
-  if (record.defaultScope !== undefined) {
-    if (
-      typeof record.defaultScope !== "string" ||
-      !/^[a-z][a-z0-9-]*$/.test(record.defaultScope)
-    ) {
-      throw new Error(`${where}.defaultScope must be a scope name`);
-    }
-    out.defaultScope = record.defaultScope;
-  }
-  for (const key of ["swarm", "hookDebug"] as const) {
-    if (record[key] !== undefined && typeof record[key] !== "boolean") {
-      throw new Error(`${where}.${key} must be true or false`);
-    }
-    if (typeof record[key] === "boolean") out[key] = record[key];
-  }
-  if (record.sensorTimeoutMs !== undefined) {
-    if (
-      typeof record.sensorTimeoutMs !== "number" ||
-      !Number.isInteger(record.sensorTimeoutMs) ||
-      record.sensorTimeoutMs <= 0
-    ) {
-      throw new Error(`${where}.sensorTimeoutMs must be a positive integer`);
-    }
-    out.sensorTimeoutMs = record.sensorTimeoutMs;
-  }
-  if (record.bypasses !== undefined) {
-    if (
-      !Array.isArray(record.bypasses) ||
-      record.bypasses.some((item) =>
-        typeof item !== "string" ||
-        !(RECORDABLE_PROJECT_BYPASSES as readonly string[]).includes(item)
-      )
-    ) {
-      throw new Error(
-        `${where}.bypasses must contain only ${RECORDABLE_PROJECT_BYPASSES.join(", ")}`,
-      );
-    }
-    out.bypasses = [
-      ...new Set(record.bypasses as RecordableProjectBypass[]),
-    ].sort();
-  }
-  return out;
-}
-
 interface ShippedHarnessData {
   rulesSubdir: string | null;
   plugins: ReadonlySet<string> | null;
   runnerFrontmatterAdditions: readonly string[];
-  flags: ProjectFlagsRecord | null;
 }
 
 let _shippedHarnessData: ShippedHarnessData | null = null;
@@ -348,8 +266,17 @@ function readShippedHarnessData(): ShippedHarnessData {
       rulesSubdir?: unknown;
       plugins?: unknown;
       runnerFrontmatterAdditions?: unknown;
+      models?: unknown;
       flags?: unknown;
     };
+    const policyKeys = ["models", "flags"].filter((key) =>
+      Object.hasOwn(parsed, key)
+    );
+    if (policyKeys.length > 0) {
+      throw new Error(
+        `${p}: harness.json contains policy key(s) ${policyKeys.join(", ")}; use aidlc.settings.json`,
+      );
+    }
     let plugins: ReadonlySet<string> | null = null;
     if (Object.hasOwn(parsed, "plugins")) {
       if (!Array.isArray(parsed.plugins)) {
@@ -382,8 +309,7 @@ function readShippedHarnessData(): ShippedHarnessData {
       }
       runnerFrontmatterAdditions = [...parsed.runnerFrontmatterAdditions];
     }
-    const flags = normalizeProjectFlagsRecord(parsed.flags, `${p}: harness.json field "flags"`);
-    _shippedHarnessData = { rulesSubdir, plugins, runnerFrontmatterAdditions, flags };
+    _shippedHarnessData = { rulesSubdir, plugins, runnerFrontmatterAdditions };
     return _shippedHarnessData;
   } catch (err) {
     if (err instanceof Error && err.message.startsWith(`${p}:`)) throw err;
@@ -393,7 +319,6 @@ function readShippedHarnessData(): ShippedHarnessData {
     rulesSubdir: null,
     plugins: null,
     runnerFrontmatterAdditions: [],
-    flags: null,
   };
   return _shippedHarnessData;
 }
@@ -414,7 +339,7 @@ export function pluginsEnabled(): ReadonlySet<string> | null {
 }
 
 export function projectFlags(): ProjectFlagsRecord | null {
-  return readShippedHarnessData().flags;
+  return resolveAidlcSettings(resolveProjectDir()).flags;
 }
 
 const PROJECT_FLAG_FIELDS: Record<string, keyof ProjectFlagsRecord> = {
@@ -461,6 +386,7 @@ export function stageEnabledBySelection(stage: { plugin?: string; phase?: string
 
 export function _resetHarnessDataForTests(): void {
   _shippedHarnessData = null;
+  _resetSettingsCacheForTests();
 }
 
 export function rulesSubdir(): string {

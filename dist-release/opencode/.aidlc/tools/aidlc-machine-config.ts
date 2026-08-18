@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import {
   type CommandResult,
@@ -18,6 +17,14 @@ import {
   transactionState,
   writeOperation,
 } from "./aidlc-transaction.ts";
+import {
+  invalidateSettingsCache,
+  machineSettingsPath,
+  normalizeAidlcSettings,
+  readSettingsTarget,
+  serializeAidlcSettings,
+  type AidlcSettingsFile,
+} from "./aidlc-settings.ts";
 
 export type MachineConfig = {
   schemaVersion: 1;
@@ -37,7 +44,7 @@ const CONFIG_KEYS: readonly MachineConfigKey[] = [
 ];
 
 export function machineConfigPath(): string {
-  return join(installRoot(), "config.json");
+  return machineSettingsPath();
 }
 
 export function updateCachePath(): string {
@@ -104,9 +111,21 @@ function validateMachineConfig(value: unknown): MachineConfig {
 
 export function readMachineConfig(): MachineConfig {
   const path = machineConfigPath();
-  if (!existsSync(path)) return { schemaVersion: 1 };
   try {
-    return validateMachineConfig(JSON.parse(readFileSync(path, "utf-8")));
+    const settings = readSettingsTarget(process.cwd(), "global");
+    return validateMachineConfig({
+      schemaVersion: 1,
+      ...(settings?.["update-check"] !== undefined
+        ? { "update-check": settings["update-check"] }
+        : {}),
+      ...(settings?.offline !== undefined ? { offline: settings.offline } : {}),
+      ...(settings?.["release-base-url"] !== undefined
+        ? { "release-base-url": settings["release-base-url"] }
+        : {}),
+      ...(settings?.["ca-bundle"] !== undefined
+        ? { "ca-bundle": settings["ca-bundle"] }
+        : {}),
+    });
   } catch (error) {
     throw new Error(
       `${path}: ${error instanceof Error ? error.message : String(error)}`,
@@ -117,17 +136,27 @@ export function readMachineConfig(): MachineConfig {
 export function writeMachineConfig(config: MachineConfig): void {
   const valid = validateMachineConfig(config);
   const path = machineConfigPath();
+  const current = readSettingsTarget(process.cwd(), "global") ?? {
+    schemaVersion: 1,
+  };
+  const next: AidlcSettingsFile = JSON.parse(JSON.stringify(current));
+  for (const key of CONFIG_KEYS) delete next[key];
+  for (const key of CONFIG_KEYS) {
+    if (valid[key] !== undefined) Object.assign(next, { [key]: valid[key] });
+  }
+  const settings = normalizeAidlcSettings(next, "machine", path);
   const root = machineTransactionRoot();
   executePlan({
     schemaVersion: 1,
     root,
     operations: [writeOperation(
       relative(root, path),
-      `${JSON.stringify(valid, null, 2)}\n`,
+      serializeAidlcSettings(settings),
       transactionState(path),
       0o600,
     )],
   });
+  invalidateSettingsCache(path);
 }
 
 export function resolvedReleaseSettings(options: {

@@ -179,7 +179,7 @@
       "sha256:33d5ae72c2de479ccfb792e2fc707fba846143caf3ed0a585d734ba1d8a73578"
     ],
     ".aidlc/skills/aidlc/SKILL.md": [
-      "sha256:58fac4a2004f9eae1ed74acdbc065e0e81ef6c8066630df654c10699f631e3e9"
+      "sha256:47953b37ba2b08de0ec4e24c28c907f24dd5dd0b3fa1dfd303dad9bda3dbd5bb"
     ],
     ".aidlc/skills/aidlc-approval-handoff/SKILL.md": [
       "sha256:d1ba22eba047d6c8e9f3815640d77e1e613697f55995625d096454324b178970"
@@ -317,7 +317,7 @@
       "sha256:cf18036fcc59dfea71428d87a02e8c92f9713c57fb2916cd65f566d3b743f98e"
     ],
     ".opencode/plugin/aidlc-opencode-adapter.ts": [
-      "sha256:449fe407a30086237b648769c405b4a8cc480587c317cf912fc13d334a6d5c79"
+      "sha256:833fc33b133e7695bd128319067836f45a015bbdbfecb80b2386c92c19f86993"
     ]
   }
 }

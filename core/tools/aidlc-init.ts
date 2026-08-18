@@ -31,7 +31,12 @@ import {
   sha256File,
   walkFiles,
 } from "./aidlc-distribution.ts";
-import { activeVersion, projectDirFrom, runtimeRoot } from "./aidlc-install-paths.ts";
+import {
+  activeVersion,
+  machineTransactionRoot,
+  projectDirFrom,
+  runtimeRoot,
+} from "./aidlc-install-paths.ts";
 import { defaultHarnessPath } from "./aidlc-machine-config.ts";
 import { configureProjectPin } from "./aidlc-lifecycle.ts";
 import {
@@ -90,6 +95,7 @@ import {
 import { resolveTierCap } from "./aidlc-tiers.ts";
 import {
   applyConfigDiagnosticRecords,
+  applyProjectFlagsToProjection,
   availableScopeNames,
   completionInstruction,
   detectAwsCredentials,
@@ -124,6 +130,22 @@ import {
   type RuntimeRecord,
   type TrustRecord,
 } from "./aidlc-config-diagnostics.ts";
+import {
+  LOCAL_SETTINGS_FILE,
+  invalidateSettingsCache,
+  modelPolicyForHarness,
+  readSettingsTarget,
+  resolveAidlcSettings,
+  resolveAidlcSettingsWithOverride,
+  serializeAidlcSettings,
+  settingsModelsFromHarnessPolicy,
+  settingsPathForTarget,
+  settingsSource,
+  updateSettingsSection,
+  type AidlcSettingsFile,
+  type ResolvedAidlcSettings,
+  type SettingsTarget,
+} from "./aidlc-settings.ts";
 
 type RootContribution =
   | { policy: "managed-block"; hash: string; marker?: string }
@@ -155,6 +177,7 @@ type ModelsMutationContext = {
   tiers: AgentTiers;
   summaryLines: string[];
   notes: string[];
+  settings: SettingsMutation;
 };
 
 type DiagnosticSection = "runtime" | "providers" | "trust";
@@ -185,10 +208,18 @@ type ChoicesMutationContext = {
   next: ProjectFlagsRecord | ProjectChoicesRecord | null;
   previousPlugins: string[] | null;
   nextPlugins: string[] | null;
-  overrides: ConfigDiagnosticOverrides;
+  overrides?: ConfigDiagnosticOverrides;
   mcpMode?: "defaults" | "none";
   summaryLines: string[];
   notes: string[];
+  settings?: SettingsMutation;
+};
+
+type SettingsMutation = {
+  target: SettingsTarget;
+  path: string;
+  previous: AidlcSettingsFile | null;
+  next: AidlcSettingsFile | null;
 };
 
 const CONFIG_VALUE_FLAGS = new Set([
@@ -243,8 +274,11 @@ const CHOICE_BARE_FLAGS = new Set([
   "--check",
   "--dry-run",
   "--help",
+  "--global",
   "--json",
+  "--local",
   "--no-color",
+  "--project",
   "--quiet",
   "--reset",
   "--show",
@@ -295,8 +329,11 @@ const MODELS_BARE_FLAGS = new Set([
   "--check",
   "--dry-run",
   "--help",
+  "--global",
   "--json",
+  "--local",
   "--no-color",
+  "--project",
   "--quiet",
   "--reset",
   "--show",
@@ -332,16 +369,57 @@ function modelHarness(value: string): ModelHarness {
   throw new Error(`models policy is not supported for harness ${JSON.stringify(value)}`);
 }
 
-function modelPolicyFromHarnessRoot(harnessRoot: string): ModelPolicyRecord | null {
-  const path = join(harnessRoot, "tools", "data", "harness.json");
-  const value = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
-  return normalizeModelPolicy(value.models);
-}
-
 function cloneModelPolicy(policy: ModelPolicyRecord | null): ModelPolicyRecord {
   return policy
     ? JSON.parse(JSON.stringify(policy)) as ModelPolicyRecord
     : { schemaVersion: 1 };
+}
+
+const SETTINGS_TARGET_FLAGS = [
+  ["--local", "local"],
+  ["--project", "project"],
+  ["--global", "global"],
+] as const;
+
+function settingsProjectAvailable(projectDir: string): boolean {
+  return discoverProjectHarnesses(projectDir).length > 0 ||
+    [".git", "package.json", "Cargo.toml", "go.mod", "pyproject.toml"]
+      .some((entry) => existsSync(join(projectDir, entry)));
+}
+
+function settingsTargetForMutation(
+  argv: readonly string[],
+  projectDir: string,
+): SettingsTarget {
+  const selected = SETTINGS_TARGET_FLAGS.filter(([flag]) => argv.includes(flag));
+  if (selected.length > 1) {
+    throw new Error("pass exactly one settings target: --local, --project, or --global");
+  }
+  const inProject = settingsProjectAvailable(projectDir);
+  if (selected.length === 1) {
+    const target = selected[0][1];
+    if (!inProject && target !== "global") {
+      throw new Error(
+        `outside an installed project only --global is valid; machine settings live at ${
+          settingsPathForTarget(projectDir, "global")
+        }`,
+      );
+    }
+    return target;
+  }
+  if (!inProject) return "global";
+  if (!configInputIsTty()) {
+    throw new Error(
+      "settings mutation requires exactly one of --local, --project, or --global; use --project for team-shared repository policy",
+    );
+  }
+  const answer = prompt(
+    "Record settings in [project recommended/local/global]:",
+  )?.trim().toLowerCase();
+  if (!answer || answer === "project") return "project";
+  if (answer === "local") return "local";
+  if (answer === "global" || answer === "machine") return "global";
+  throw new Error("settings layer selection cancelled");
 }
 
 function validateModelsArgs(argv: readonly string[]): string | null {
@@ -384,6 +462,12 @@ function modelPolicyHelp(): string {
     "  --agent <name> --effort <value> [--model <raw-id>]",
     "  --reset",
     "",
+    "Write target (required for mutations):",
+    "  --project  committed team policy (recommended in a repository)",
+    "  --local    personal project policy in aidlc.settings.local.json",
+    "  --global   machine policy in the install-root aidlc.settings.json",
+    "Outside an installed project, --global is the only valid target and is inferred.",
+    "",
     "Inspection:",
     "  --show [--json]",
     "  --check",
@@ -399,16 +483,45 @@ function modelStateData(
   tiers: AgentTiers,
   harness: ModelHarness,
   projectDir: string,
+  resolved: ResolvedAidlcSettings,
 ): {
   harness: ModelHarness;
   policy: ModelPolicyRecord | null;
-  effective: ReturnType<typeof resolveModelPolicy>[];
+  effective: Array<
+    ReturnType<typeof resolveModelPolicy> & {
+      modelSource: ReturnType<typeof settingsSource>;
+      effortSource: ReturnType<typeof settingsSource>;
+    }
+  >;
   notes: string[];
 } {
   const cap = resolveTierCap(join(projectDir, "aidlc", "spaces", "default", "memory"));
   const effective = Object.entries(tiers).sort(([left], [right]) =>
     left.localeCompare(right)
-  ).map(([name, tier]) => resolveModelPolicy(policy, name, tier, harness, cap));
+  ).map(([name, tier]) => {
+    const item = resolveModelPolicy(policy, name, tier, harness, cap);
+    const agent = resolved.models?.agents?.[name];
+    const group = resolved.models?.groups?.[item.group];
+    const presetGroups = resolved.models?.preset
+      ? MODEL_PRESETS[resolved.models.preset as keyof typeof MODEL_PRESETS]?.groups as
+        Partial<Record<ModelGroup, { effort: ModelEffort }>>
+      : undefined;
+    const presetGroup = presetGroups?.[item.group];
+    const fallbackSource = process.env.AIDLC_TIER_CAP ? "env" : "shipped default";
+    return {
+      ...item,
+      modelSource: agent?.model?.[harness] !== undefined
+        ? settingsSource(resolved, `models.agents.${name}.model.${harness}`)
+        : fallbackSource,
+      effortSource: agent?.effort !== undefined
+        ? settingsSource(resolved, `models.agents.${name}.effort`)
+        : group?.effort !== undefined
+        ? settingsSource(resolved, `models.groups.${item.group}.effort`)
+        : presetGroup?.effort !== undefined
+        ? settingsSource(resolved, "models.preset")
+        : fallbackSource,
+    };
+  });
   return {
     harness,
     policy,
@@ -422,9 +535,10 @@ function showModels(
   tiers: AgentTiers,
   harness: ModelHarness,
   projectDir: string,
+  resolved: ResolvedAidlcSettings,
   options: ReturnType<typeof globalOptions>,
 ): void {
-  const data = modelStateData(policy, tiers, harness, projectDir);
+  const data = modelStateData(policy, tiers, harness, projectDir, resolved);
   if (options.mode === "json") {
     emitResult(success(`model policy for ${harness}`, data), options);
     return;
@@ -433,7 +547,7 @@ function showModels(
   for (const item of data.effective) {
     output += `  ${item.agent} [${MODEL_GROUPS[item.group].label}] ${
       item.model ?? "inherit"
-    }/${item.effort ?? "inherit"}\n`;
+    } (${item.modelSource})/${item.effort ?? "inherit"} (${item.effortSource})\n`;
     output += `    provenance: ${item.layer}`;
     if (item.unexpressed.length > 0) {
       output += `; not expressible: ${item.unexpressed.join(", ")}`;
@@ -486,6 +600,7 @@ function applyModelsFlags(
   current: ModelPolicyRecord | null,
   argv: readonly string[],
   tiers: AgentTiers,
+  profileSource: ModelPolicyRecord | null = current,
 ): ModelPolicyRecord | null {
   if (argv.includes("--reset")) {
     const conflicting = [
@@ -519,7 +634,7 @@ function applyModelsFlags(
     throw new Error("--save-as must use lowercase letters, digits, and hyphens");
   }
   if (from) {
-    const groups = profileGroups(current, from);
+    const groups = profileGroups(profileSource, from);
     next.groups = groups;
     if (isModelPreset(from) && !saveAs) next.preset = from;
     else delete next.preset;
@@ -626,11 +741,13 @@ function modelSummaryLines(
 
 function modelsWizard(
   current: ModelPolicyRecord | null,
+  targetCurrent: ModelPolicyRecord | null,
   tiers: AgentTiers,
   harness: ModelHarness,
   projectDir: string,
+  resolved: ResolvedAidlcSettings,
 ): ModelPolicyRecord | null {
-  showModels(current, tiers, harness, projectDir, {
+  showModels(current, tiers, harness, projectDir, resolved, {
     mode: "human",
     color: false,
     yes: false,
@@ -650,7 +767,7 @@ function modelsWizard(
     );
     const selected = prompt("Preset [thorough/balanced/minimal]:")?.trim() ?? "";
     if (!isModelPreset(selected)) throw new Error("preset selection cancelled");
-    return applyModelsFlags(current, ["--preset", selected], tiers);
+    return applyModelsFlags(targetCurrent, ["--preset", selected], tiers, current);
   }
   if (choice === "2") {
     const args: string[] = [];
@@ -666,12 +783,14 @@ function modelsWizard(
       if (!isModelEffort(answer)) throw new Error(`invalid effort ${JSON.stringify(answer)}`);
       args.push(`--${group}-effort`, answer);
     }
-    return args.length > 0 ? applyModelsFlags(current, args, tiers) : current;
+    return args.length > 0
+      ? applyModelsFlags(targetCurrent, args, tiers, current)
+      : targetCurrent;
   }
   if (choice === "3") {
-    let next = current;
+    let next = targetCurrent;
     for (const name of Object.keys(tiers).sort()) {
-      const currentValue = resolveModelPolicy(next, name, tiers[name], harness);
+      const currentValue = resolveModelPolicy(current, name, tiers[name], harness);
       process.stdout.write(
         `${name}: current ${currentValue.model ?? "inherit"}/${currentValue.effort ?? "inherit"}.\n`,
       );
@@ -685,6 +804,7 @@ function modelsWizard(
         next,
         ["--agent", name, "--effort", effort, ...(model ? ["--model", model] : [])],
         tiers,
+        current,
       );
     }
     return next;
@@ -1285,7 +1405,11 @@ function setupMapRows(
 ): SetupMapRow[] {
   const root = join(projectDir, harnessDir);
   const records = readConfigDiagnosticRecords(root);
-  const policy = modelPolicyFromHarnessRoot(root);
+  const resolved = resolveAidlcSettings(projectDir);
+  const policy = modelPolicyForHarness(
+    resolved.models,
+    modelHarness(distribution),
+  );
   const runtime = outstanding.filter((action) => action.section === "runtime");
   const trust = outstanding.filter((action) => action.section === "trust");
   const providers = outstanding.filter((action) => action.section === "providers");
@@ -1295,9 +1419,9 @@ function setupMapRows(
     : policy.preset
     ? `preset ${policy.preset}`
     : "recorded project policy";
-  const flagDetail = records.flags
-    ? `scope ${records.flags.defaultScope ?? "inherit"}, swarm ${
-        records.flags.swarm === undefined ? "inherit" : records.flags.swarm ? "on" : "off"
+  const flagDetail = resolved.flags
+    ? `scope ${resolved.flags.defaultScope ?? "inherit"}, swarm ${
+        resolved.flags.swarm === undefined ? "inherit" : resolved.flags.swarm ? "on" : "off"
       }`
     : "defaults";
   const plugins = readPluginSelection(root);
@@ -1615,6 +1739,12 @@ function validateChoiceArgs(
       continue;
     }
     if (!CHOICE_BARE_FLAGS.has(token)) return `unknown ${section} option ${token}`;
+    if (
+      section !== "flags" &&
+      (token === "--local" || token === "--project" || token === "--global")
+    ) {
+      return `${token} is not valid for config ${section}`;
+    }
   }
   if (valuesAfter(argv, "--harness").length > 1) {
     return "multi-harness config is not supported yet; pass one --harness <name>";
@@ -1635,6 +1765,12 @@ function choiceHelp(section: ChoiceSection): string {
         "",
         "Environment variables always override recorded answers.",
         "Bypasses weaken deterministic guards and are accepted only through explicit --bypass flags.",
+        "",
+        "Write target (required for mutations):",
+        "  --project  committed team policy (recommended in a repository)",
+        "  --local    personal project policy in aidlc.settings.local.json",
+        "  --global   machine policy in the install-root aidlc.settings.json",
+        "Outside an installed project, --global is the only valid target and is inferred.",
       ]
     : [
         "Project choices:",
@@ -1811,27 +1947,47 @@ function showChoiceSection(
   projectDir: string,
   selected: ReturnType<typeof selectedDiagnosticHarness>,
   records: ConfigDiagnosticRecords,
+  resolved: ResolvedAidlcSettings,
   options: ReturnType<typeof globalOptions>,
 ): void {
   const plugins = readPluginSelection(selected.root);
   let data: Record<string, unknown>;
   if (section === "flags") {
+    const effective = effectiveProjectFlagValues(resolved.flags);
+    const sources = Object.fromEntries([
+      ["AWS_AIDLC_DEFAULT_SCOPE", "defaultScope"],
+      ["AIDLC_USE_SWARM", "swarm"],
+      ["AIDLC_HOOK_DEBUG", "hookDebug"],
+      ["AIDLC_SENSOR_TIMEOUT_MS", "sensorTimeoutMs"],
+    ].map(([envName, field]) => [
+      envName,
+      Object.hasOwn(process.env, envName)
+        ? "env"
+        : settingsSource(resolved, `flags.${field}`),
+    ]));
+    for (const bypass of RECORDABLE_PROJECT_BYPASSES) {
+      sources[bypass] = Object.hasOwn(process.env, bypass)
+        ? "env"
+        : settingsSource(resolved, "flags.bypasses");
+    }
     data = {
       section,
       harness: selected.harness,
-      record: records.flags,
-      effective: effectiveProjectFlagValues(records.flags),
+      record: resolved.flags,
+      effective,
+      sources,
       issues: flagIssues(
         projectDir,
         selected.harnessDir,
         selected.harness,
-        records.flags,
+        resolved.flags,
       ),
       files: flagFiles(
         projectDir,
         selected.harnessDir,
         selected.harness,
-        records.flags,
+        resolved.flags,
+        resolved,
       ),
     };
   } else {
@@ -1875,12 +2031,25 @@ function showChoiceSection(
   }
   let output = `${section[0].toUpperCase()}${section.slice(1)} configuration for ${selected.harness}\n`;
   if (section === "flags") {
-    output += `  Default scope: ${records.flags?.defaultScope ?? "inherit"}\n`;
-    output += `  Swarm: ${records.flags?.swarm === undefined ? "inherit" : records.flags.swarm ? "on" : "off"}\n`;
-    output += `  Hook debug: ${records.flags?.hookDebug === undefined ? "inherit" : records.flags.hookDebug ? "on" : "off"}\n`;
-    output += `  Sensor timeout: ${records.flags?.sensorTimeoutMs ?? "inherit"}\n`;
-    for (const bypass of records.flags?.bypasses ?? []) {
-      output += `  Bypass enabled: ${bypass}\n`;
+    const sources = data.sources as Record<string, string>;
+    output += `  Default scope: ${resolved.flags?.defaultScope ?? "inherit"} [${
+      sources.AWS_AIDLC_DEFAULT_SCOPE
+    }]\n`;
+    output += `  Swarm: ${
+      resolved.flags?.swarm === undefined ? "inherit" : resolved.flags.swarm ? "on" : "off"
+    } [${sources.AIDLC_USE_SWARM}]\n`;
+    output += `  Hook debug: ${
+      resolved.flags?.hookDebug === undefined
+        ? "inherit"
+        : resolved.flags.hookDebug
+        ? "on"
+        : "off"
+    } [${sources.AIDLC_HOOK_DEBUG}]\n`;
+    output += `  Sensor timeout: ${resolved.flags?.sensorTimeoutMs ?? "inherit"} [${
+      sources.AIDLC_SENSOR_TIMEOUT_MS
+    }]\n`;
+    for (const bypass of resolved.flags?.bypasses ?? []) {
+      output += `  Bypass enabled: ${bypass} [${sources[bypass]}]\n`;
     }
     output += "  Files carrying flags:\n";
     for (const entry of data.files as ReturnType<typeof flagFiles>) {
@@ -1911,6 +2080,7 @@ function checkChoiceSection(
   projectDir: string,
   selected: ReturnType<typeof selectedDiagnosticHarness>,
   records: ConfigDiagnosticRecords,
+  resolved: ResolvedAidlcSettings,
   options: ReturnType<typeof globalOptions>,
 ): void {
   const plugins = readPluginSelection(selected.root);
@@ -1919,7 +2089,7 @@ function checkChoiceSection(
         projectDir,
         selected.harnessDir,
         selected.harness,
-        records.flags,
+        resolved.flags,
       )
     : projectChoiceIssues(
         projectDir,
@@ -1951,12 +2121,14 @@ function choiceWizard(
   projectDir: string,
   selected: ReturnType<typeof selectedDiagnosticHarness>,
   records: ConfigDiagnosticRecords,
+  resolved: ResolvedAidlcSettings,
+  targetCurrentFlags: ProjectFlagsRecord | null,
   options: ReturnType<typeof globalOptions>,
 ): {
   next: ProjectFlagsRecord | ProjectChoicesRecord;
   plugins: string[] | null;
 } {
-  showChoiceSection(section, projectDir, selected, records, {
+  showChoiceSection(section, projectDir, selected, records, resolved, {
     ...options,
     mode: "human",
   });
@@ -1977,7 +2149,7 @@ function choiceWizard(
     const timeout = prompt("Sensor timeout ms [Enter keep]:")?.trim();
     if (timeout) args.push("--sensor-timeout-ms", timeout);
     return {
-      next: buildFlagsRecord(records.flags, args, selected.root),
+      next: buildFlagsRecord(targetCurrentFlags, args, selected.root),
       plugins: readPluginSelection(selected.root),
     };
   }
@@ -2090,19 +2262,28 @@ function prepareChoiceSection(
     section,
   );
   const records = readConfigDiagnosticRecords(selected.root);
+  const resolved = resolveAidlcSettings(projectDir);
   if (argv.includes("--show")) {
-    showChoiceSection(section, projectDir, selected, records, options);
+    showChoiceSection(section, projectDir, selected, records, resolved, options);
     return null;
   }
   if (argv.includes("--check")) {
-    checkChoiceSection(section, projectDir, selected, records, options);
+    checkChoiceSection(section, projectDir, selected, records, resolved, options);
     return null;
   }
-  const previous = section === "flags" ? records.flags : records.project;
+  const previous = section === "flags" ? resolved.flags : records.project;
   const previousPlugins = readPluginSelection(selected.root);
   let next: ProjectFlagsRecord | ProjectChoicesRecord | null;
   let nextPlugins = previousPlugins;
   let mcpMode: "defaults" | "none" | undefined;
+  let settings: SettingsMutation | undefined;
+  const target = section === "flags" && (hasMutationFlags || configInputIsTty())
+    ? settingsTargetForMutation(argv, projectDir)
+    : undefined;
+  const targetCurrentSettings = target
+    ? readSettingsTarget(projectDir, target)
+    : null;
+  const targetCurrentFlags = targetCurrentSettings?.flags ?? null;
   if (argv.includes("--reset")) {
     const conflict = mutationFlags.find((flag) => flag !== "--reset" && argv.includes(flag));
     if (conflict) throw new Error(`--reset cannot be combined with ${conflict}`);
@@ -2113,7 +2294,7 @@ function prepareChoiceSection(
     }
   } else if (hasMutationFlags) {
     if (section === "flags") {
-      next = buildFlagsRecord(records.flags, argv, selected.root);
+      next = buildFlagsRecord(targetCurrentFlags, argv, selected.root);
     } else {
       const built = buildProjectRecord(
         records.project,
@@ -2139,14 +2320,46 @@ function prepareChoiceSection(
       );
       return null;
     }
-    const built = choiceWizard(section, projectDir, selected, records, options);
+    const built = choiceWizard(
+      section,
+      projectDir,
+      selected,
+      records,
+      resolved,
+      targetCurrentFlags,
+      options,
+    );
     next = built.next;
     nextPlugins = built.plugins;
     if (section === "project") {
       mcpMode = (built.next as ProjectChoicesRecord).mcp;
     }
   }
+  if (section === "flags" && target) {
+    const nextSettings = updateSettingsSection(
+      targetCurrentSettings,
+      "flags",
+      next as ProjectFlagsRecord | null,
+    );
+    if (canonical(targetCurrentSettings) === canonical(nextSettings)) {
+      emitResult(success("flags configuration unchanged"), options);
+      return null;
+    }
+    const nextResolved = resolveAidlcSettingsWithOverride(
+      projectDir,
+      target,
+      nextSettings,
+    );
+    next = nextResolved.flags;
+    settings = {
+      target,
+      path: settingsPathForTarget(projectDir, target),
+      previous: targetCurrentSettings,
+      next: nextSettings,
+    };
+  }
   if (
+    section !== "flags" &&
     canonical(previous) === canonical(next) &&
     canonical(previousPlugins) === canonical(nextPlugins)
   ) {
@@ -2186,13 +2399,13 @@ function prepareChoiceSection(
       next,
       previousPlugins,
       nextPlugins,
-      overrides: {
-        [section]: next,
-        ...(section === "project" ? { plugins: nextPlugins } : {}),
-      },
+      ...(section === "project"
+        ? { overrides: { project: next, plugins: nextPlugins } }
+        : {}),
       ...(mcpMode ? { mcpMode } : {}),
       summaryLines: summary.lines,
       notes: summary.notes,
+      ...(settings ? { settings } : {}),
     },
   };
 }
@@ -2241,6 +2454,80 @@ function pathPresent(path: string): boolean {
 
 function regularFile(path: string): boolean {
   return pathPresent(path) && lstatSync(path).isFile();
+}
+
+function planProjectSettingsMutation(
+  projectDir: string,
+  mutation: SettingsMutation | undefined,
+  operations: TransactionOperation[],
+  actions: PlannedAction[],
+): void {
+  if (!mutation || mutation.target === "global") return;
+  const rel = relative(projectDir, mutation.path);
+  if (mutation.next === null) {
+    if (!pathPresent(mutation.path)) return;
+    operations.push({ kind: "remove", path: rel, expected: expected(mutation.path) });
+    actions.push({ path: rel, action: "remove" });
+    return;
+  }
+  const creating = !pathPresent(mutation.path);
+  operations.push(writeOperation(
+    rel,
+    serializeAidlcSettings(mutation.next),
+    expected(mutation.path),
+  ));
+  actions.push({ path: rel, action: creating ? "create" : "update" });
+  if (mutation.target !== "local" || !creating) return;
+  const gitignorePath = join(projectDir, ".gitignore");
+  const current = regularFile(gitignorePath)
+    ? readFileSync(gitignorePath, "utf-8")
+    : "";
+  const lines = current.split(/\r?\n/);
+  if (lines.includes(LOCAL_SETTINGS_FILE)) return;
+  const separator = current.length === 0 || current.endsWith("\n") ? "" : "\n";
+  const next = `${current}${separator}${LOCAL_SETTINGS_FILE}\n`;
+  operations.push(writeOperation(
+    ".gitignore",
+    next,
+    expected(gitignorePath),
+  ));
+  actions.push({
+    path: ".gitignore",
+    action: regularFile(gitignorePath) ? "update" : "create",
+    detail: `ignore ${LOCAL_SETTINGS_FILE}`,
+  });
+}
+
+function globalSettingsOperation(
+  mutation: SettingsMutation | undefined,
+): TransactionOperation | null {
+  if (mutation?.target !== "global") return null;
+  const root = machineTransactionRoot();
+  const rel = relative(root, mutation.path);
+  if (mutation.next === null) {
+    return pathPresent(mutation.path)
+      ? { kind: "remove", path: rel, expected: expected(mutation.path) }
+      : null;
+  }
+  return writeOperation(
+    rel,
+    serializeAidlcSettings(mutation.next),
+    expected(mutation.path),
+    0o600,
+  );
+}
+
+function executeGlobalSettingsMutation(
+  mutation: SettingsMutation | undefined,
+): void {
+  const operation = globalSettingsOperation(mutation);
+  if (!operation || !mutation) return;
+  executePlan({
+    schemaVersion: 1,
+    root: machineTransactionRoot(),
+    operations: [operation],
+  });
+  invalidateSettingsCache(mutation.path);
 }
 
 function regularFilesBelow(root: string): string[] {
@@ -2516,7 +2803,8 @@ function prepareRefreshSource(
   sourceRoot: string,
   descriptor: ProjectionDescriptor,
   prior: Baseline | null,
-  modelsOverride?: ModelPolicyRecord | null,
+  modelPolicy: ModelPolicyRecord | null,
+  projectFlags: ProjectFlagsRecord | null,
   diagnosticsOverride?: ConfigDiagnosticOverrides,
 ): { root: string; cleanup?: string; regenerated: Set<string> } {
   const currentHarness = join(projectDir, descriptor.harnessDir);
@@ -2524,7 +2812,8 @@ function prepareRefreshSource(
   if (
     !prior &&
     !regularFile(currentHarnessData) &&
-    modelsOverride === undefined &&
+    modelPolicy === null &&
+    projectFlags === null &&
     diagnosticsOverride === undefined
   ) {
     return { root: sourceRoot, regenerated: new Set() };
@@ -2540,13 +2829,19 @@ function prepareRefreshSource(
   const staged = JSON.parse(readFileSync(stagedHarnessData, "utf-8")) as Record<string, unknown>;
   if (regularFile(currentHarnessData)) {
     const current = JSON.parse(readFileSync(currentHarnessData, "utf-8")) as Record<string, unknown>;
+    const policyKeys = ["models", "flags"].filter((key) => Object.hasOwn(current, key));
+    if (policyKeys.length > 0) {
+      throw new Error(
+        `${currentHarnessData}: harness.json contains policy key(s) ${policyKeys.join(", ")}; use aidlc.settings.json`,
+      );
+    }
     for (const [key, value] of Object.entries(current)) {
       if (!HARNESS_IDENTITY_KEYS.has(key)) staged[key] = value;
     }
   }
-  if (modelsOverride === null) delete staged.models;
-  else if (modelsOverride !== undefined) staged.models = modelsOverride;
-  for (const key of ["runtime", "providers", "trust", "flags", "project"] as const) {
+  delete staged.models;
+  delete staged.flags;
+  for (const key of ["runtime", "providers", "trust", "project"] as const) {
     if (!diagnosticsOverride || !Object.hasOwn(diagnosticsOverride, key)) continue;
     const value = diagnosticsOverride[key];
     if (value === null) delete staged[key];
@@ -2558,7 +2853,6 @@ function prepareRefreshSource(
   }
   if (
     regularFile(currentHarnessData) ||
-    modelsOverride !== undefined ||
     diagnosticsOverride !== undefined
   ) {
     writeFileSync(stagedHarnessData, `${JSON.stringify(staged, null, 2)}\n`);
@@ -2572,7 +2866,13 @@ function prepareRefreshSource(
     root,
     descriptor.harnessDir,
     modelHarness(distribution),
-    normalizeModelPolicy(staged.models),
+    modelPolicy,
+  );
+  applyProjectFlagsToProjection(
+    root,
+    descriptor.harnessDir,
+    modelHarness(distribution),
+    projectFlags,
   );
   applyConfigDiagnosticRecords(
     root,
@@ -2582,10 +2882,6 @@ function prepareRefreshSource(
       runtime: normalizeRuntimeRecord(staged.runtime),
       providers: normalizeProvidersRecord(staged.providers),
       trust: normalizeTrustRecord(staged.trust),
-      flags: normalizeProjectFlagsRecord(
-        staged.flags,
-        `${stagedHarnessData}: harness.json field "flags"`,
-      ),
       project: normalizeProjectChoicesRecord(staged.project),
     },
   );
@@ -3573,10 +3869,11 @@ function prepareModelsSection(
     return null;
   }
   const harness = modelHarness(selected.distribution);
-  const current = modelPolicyFromHarnessRoot(selected.root);
+  const resolved = resolveAidlcSettings(projectDir);
+  const current = modelPolicyForHarness(resolved.models, harness);
   const tiers = readAgentTiers(selected.root);
   if (argv.includes("--show")) {
-    showModels(current, tiers, harness, projectDir, options);
+    showModels(current, tiers, harness, projectDir, resolved, options);
     return null;
   }
   if (argv.includes("--check")) {
@@ -3584,6 +3881,7 @@ function prepareModelsSection(
       projectDir,
       selected.harnessDir,
       harness,
+      current,
     );
     emitResult(
       drift.length === 0
@@ -3601,26 +3899,56 @@ function prepareModelsSection(
     return null;
   }
 
-  let next: ModelPolicyRecord | null;
-  if (hasMutationFlags) {
-    next = applyModelsFlags(current, argv, tiers);
-  } else {
-    if (!process.stdin.isTTY) {
-      emitResult(
-        usage(
-          "non-interactive model configuration requires a policy flag: --preset, --from, a group effort flag, --agent, or --reset; --yes confirms but never chooses a policy",
-          "aidlc config models --help",
-        ),
-        options,
-      );
-      return null;
-    }
-    next = modelsWizard(current, tiers, harness, projectDir);
+  if (!hasMutationFlags && !configInputIsTty()) {
+    emitResult(
+      usage(
+        "non-interactive model configuration requires a policy flag: --preset, --from, a group effort flag, --agent, or --reset; --yes confirms but never chooses a policy",
+        "aidlc config models --help",
+      ),
+      options,
+    );
+    return null;
   }
-  if (canonical(current) === canonical(next)) {
+  const target = settingsTargetForMutation(argv, projectDir);
+  const targetPath = settingsPathForTarget(projectDir, target);
+  const targetCurrentSettings = readSettingsTarget(projectDir, target);
+  const targetCurrent = modelPolicyForHarness(
+    targetCurrentSettings?.models ?? null,
+    harness,
+  );
+  let targetNext: ModelPolicyRecord | null;
+  if (hasMutationFlags) {
+    targetNext = applyModelsFlags(targetCurrent, argv, tiers, current);
+  } else {
+    targetNext = modelsWizard(
+      current,
+      targetCurrent,
+      tiers,
+      harness,
+      projectDir,
+      resolved,
+    );
+  }
+  const targetModels = settingsModelsFromHarnessPolicy(
+    targetCurrentSettings?.models ?? null,
+    harness,
+    targetNext,
+  );
+  const targetNextSettings = updateSettingsSection(
+    targetCurrentSettings,
+    "models",
+    targetModels,
+  );
+  if (canonical(targetCurrentSettings) === canonical(targetNextSettings)) {
     emitResult(success("model policy unchanged"), options);
     return null;
   }
+  const nextResolved = resolveAidlcSettingsWithOverride(
+    projectDir,
+    target,
+    targetNextSettings,
+  );
+  const next = modelPolicyForHarness(nextResolved.models, harness);
   if (!argv.includes("--dry-run") && !options.yes) {
     if (!process.stdin.isTTY) {
       emitResult(
@@ -3648,8 +3976,185 @@ function prepareModelsSection(
       tiers,
       summaryLines: summary.lines,
       notes: summary.notes,
+      settings: {
+        target,
+        path: targetPath,
+        previous: targetCurrentSettings,
+        next: targetNextSettings,
+      },
     },
   };
+}
+
+function handleSettingsOnlySection(
+  section: "models" | "flags",
+  argv: string[],
+  options: ReturnType<typeof globalOptions>,
+): boolean {
+  const projectDir = projectDirFrom(argv);
+  if (discoverProjectHarnesses(projectDir).length > 0 || argv.includes("--help")) {
+    return false;
+  }
+  const validation = section === "models"
+    ? validateModelsArgs(argv)
+    : validateChoiceArgs("flags", argv);
+  if (validation) {
+    emitResult(usage(validation, `aidlc config ${section} --help`), options);
+    return true;
+  }
+  let resolved: ResolvedAidlcSettings;
+  try {
+    resolved = resolveAidlcSettings(projectDir);
+  } catch (error) {
+    emitResult(failure(
+      error instanceof Error ? error.message : String(error),
+      EXIT.usage,
+    ), options);
+    return true;
+  }
+  if (argv.includes("--show")) {
+    emitResult(success(
+      `${section} settings without an installed harness`,
+      section === "models"
+        ? {
+            policy: resolved.models,
+            sources: resolved.sources,
+            effective: [],
+          }
+        : {
+            record: resolved.flags,
+            effective: effectiveProjectFlagValues(resolved.flags),
+            sources: resolved.sources,
+          },
+    ), options);
+    return true;
+  }
+  if (argv.includes("--check")) {
+    emitResult(success(`${section} settings files are valid`, {
+      files: resolved.files,
+    }), options);
+    return true;
+  }
+  const modelMutationFlags = [
+    "--agent",
+    "--deciding-effort",
+    "--effort",
+    "--from",
+    "--model",
+    "--preset",
+    "--reset",
+    "--reviewing-effort",
+    "--save-as",
+    "--writing-up-effort",
+  ];
+  const flagMutationFlags = [
+    "--bypass",
+    "--clear-bypass",
+    "--default-scope",
+    "--hook-debug",
+    "--reset",
+    "--sensor-timeout-ms",
+    "--swarm",
+  ];
+  const mutationFlags = section === "models" ? modelMutationFlags : flagMutationFlags;
+  if (!mutationFlags.some((flag) => argv.includes(flag))) {
+    emitResult(usage(
+      `non-interactive ${section} configuration requires an explicit policy flag`,
+      `aidlc config ${section} --help`,
+    ), options);
+    return true;
+  }
+  try {
+    const target = settingsTargetForMutation(argv, projectDir);
+    const path = settingsPathForTarget(projectDir, target);
+    const currentFile = readSettingsTarget(projectDir, target);
+    let nextFile: AidlcSettingsFile | null;
+    if (section === "models") {
+      const requestedHarness = valueAfter(argv, "--harness");
+      const harness = requestedHarness ? modelHarness(requestedHarness) : "claude";
+      if (argv.includes("--model") && !requestedHarness) {
+        throw new Error(
+          "outside an installed harness, --agent ... --model requires --harness so the model ID is stored under one harness key",
+        );
+      }
+      const currentEffective = modelPolicyForHarness(resolved.models, harness);
+      const currentTarget = modelPolicyForHarness(
+        currentFile?.models ?? null,
+        harness,
+      );
+      const agent = valueAfter(argv, "--agent");
+      const tiers: AgentTiers = agent ? { [agent]: "judgment" } : {};
+      const nextPolicy = applyModelsFlags(
+        currentTarget,
+        argv,
+        tiers,
+        currentEffective,
+      );
+      nextFile = updateSettingsSection(
+        currentFile,
+        "models",
+        settingsModelsFromHarnessPolicy(
+          currentFile?.models ?? null,
+          harness,
+          nextPolicy,
+        ),
+      );
+    } else {
+      if (argv.includes("--default-scope")) {
+        throw new Error(
+          "--default-scope requires an installed project harness so the scope name can be validated",
+        );
+      }
+      const nextFlags = argv.includes("--reset")
+        ? null
+        : buildFlagsRecord(currentFile?.flags ?? null, argv, projectDir);
+      nextFile = updateSettingsSection(currentFile, "flags", nextFlags);
+    }
+    if (canonical(currentFile) === canonical(nextFile)) {
+      emitResult(success(`${section} configuration unchanged`), options);
+      return true;
+    }
+    const mutation: SettingsMutation = {
+      target,
+      path,
+      previous: currentFile,
+      next: nextFile,
+    };
+    if (argv.includes("--dry-run")) {
+      emitResult(success(`${section} settings plan`, {
+        target,
+        path,
+        previous: currentFile,
+        next: nextFile,
+      }), options);
+      return true;
+    }
+    if (!options.yes) {
+      emitResult(usage(
+        `non-interactive ${section} mutation requires --yes; --yes confirms but never chooses`,
+      ), options);
+      return true;
+    }
+    if (target === "global") {
+      executeGlobalSettingsMutation(mutation);
+    } else {
+      const operations: TransactionOperation[] = [];
+      const actions: PlannedAction[] = [];
+      planProjectSettingsMutation(projectDir, mutation, operations, actions);
+      executePlan({ schemaVersion: 1, root: projectDir, operations });
+      invalidateSettingsCache(path);
+    }
+    emitResult(success(
+      `configured ${section} settings in ${path}`,
+      { target, path },
+    ), options);
+  } catch (error) {
+    emitResult(usage(
+      error instanceof Error ? error.message : String(error),
+      `aidlc config ${section} --help`,
+    ), options);
+  }
+  return true;
 }
 
 export async function main(
@@ -3676,6 +4181,15 @@ export async function main(
       ),
       options,
     );
+    return;
+  }
+  if (
+    (section?.value === "models" || section?.value === "flags") &&
+    handleSettingsOnlySection(section.value, [
+      ...argv.slice(0, section.index),
+      ...argv.slice(section.index + 1),
+    ], options)
+  ) {
     return;
   }
   let modelsContext: ModelsMutationContext | null = null;
@@ -3810,12 +4324,25 @@ export async function main(
     }
     const baselinePath = join(projectDir, descriptor.harnessDir, "tools", "data", "aidlc-manifest.json");
     const prior = readBaseline(baselinePath);
+    const settingsMutation = modelsContext?.settings ?? choicesContext?.settings;
+    const projectedSettings = settingsMutation
+      ? resolveAidlcSettingsWithOverride(
+          projectDir,
+          settingsMutation.target,
+          settingsMutation.next,
+        )
+      : resolveAidlcSettings(projectDir);
+    const projectedPolicy = modelPolicyForHarness(
+      projectedSettings.models,
+      modelHarness(stamp.distribution),
+    );
     prepared = prepareRefreshSource(
       projectDir,
       selected.root,
       descriptor,
       prior,
-      modelsContext?.next,
+      projectedPolicy,
+      projectedSettings.flags,
       diagnosticsContext?.overrides ?? choicesContext?.overrides,
     );
     let recordedProjectMcp: "defaults" | "none" | undefined;
@@ -3888,6 +4415,23 @@ export async function main(
       operations,
       actions,
     );
+    planProjectSettingsMutation(
+      projectDir,
+      settingsMutation,
+      operations,
+      actions,
+    );
+    const externalSettingsOperation = globalSettingsOperation(settingsMutation);
+    if (settingsMutation?.target === "global" && externalSettingsOperation) {
+      actions.push({
+        path: settingsMutation.path,
+        action: settingsMutation.next === null
+          ? "remove"
+          : pathPresent(settingsMutation.path)
+          ? "update"
+          : "create",
+      });
+    }
     const conflicts = actions.filter((action) => action.action === "conflict");
     if (conflicts.length > 0) {
       actions.sort((left, right) =>
@@ -3948,6 +4492,14 @@ export async function main(
             }
           : operation
       ),
+      ...(externalSettingsOperation
+        ? {
+            externalSettings: {
+              root: machineTransactionRoot(),
+              operation: externalSettingsOperation,
+            },
+          }
+        : {}),
     };
     const planToken = sha256Bytes(canonical(approvalPlan));
     if (argv.includes("--dry-run")) {
@@ -4032,6 +4584,7 @@ export async function main(
         projectDir,
         () => {
           assertRefreshSafe(projectDir);
+          executeGlobalSettingsMutation(settingsMutation);
           executePlan(plan);
         },
         undefined,
@@ -4039,7 +4592,11 @@ export async function main(
         600,
       );
     } else {
+      executeGlobalSettingsMutation(settingsMutation);
       executePlan(plan);
+    }
+    if (settingsMutation && settingsMutation.target !== "global") {
+      invalidateSettingsCache(settingsMutation.path);
     }
     if (modelsContext && options.mode === "human") {
       for (const line of modelsContext.summaryLines) process.stdout.write(`${line}\n`);

@@ -23,6 +23,11 @@ import {
 import {
   RECORDABLE_PROJECT_BYPASSES,
 } from "../../core/tools/aidlc-lib.ts";
+import {
+  invalidateSettingsCache,
+  projectSettingsPath,
+  resolveAidlcSettings,
+} from "../../core/tools/aidlc-settings.ts";
 
 const BUN = process.execPath;
 const INIT = join(REPO_ROOT, "core", "tools", "aidlc-init.ts");
@@ -125,6 +130,11 @@ function harnessData(project: string, harnessDir = ".claude"): Record<string, un
   ) as Record<string, unknown>;
 }
 
+function resolvedFlags(project: string) {
+  invalidateSettingsCache();
+  return resolveAidlcSettings(project).flags;
+}
+
 describe("t295 config choice dispatch", () => {
   test("flags and project are sections, unknown usage lists all six, and flags are strict", () => {
     for (const section of ["flags", "project"]) {
@@ -186,6 +196,7 @@ describe("t295 flags section", () => {
       "flags",
       "--project-dir",
       project,
+      "--project",
       "--default-scope",
       "not-an-installed-scope",
       "--yes",
@@ -198,6 +209,7 @@ describe("t295 flags section", () => {
       "flags",
       "--project-dir",
       project,
+      "--project",
       "--default-scope",
       recordedScope,
       "--swarm",
@@ -211,7 +223,7 @@ describe("t295 flags section", () => {
       "--yes",
     ], project, runtimeEnv());
     expect(applied.status, applied.stdout + applied.stderr).toBe(0);
-    const flags = readConfigDiagnosticRecords(join(project, ".claude")).flags;
+    const flags = resolvedFlags(project);
     expect(flags).toEqual({
       schemaVersion: 1,
       defaultScope: recordedScope,
@@ -220,6 +232,7 @@ describe("t295 flags section", () => {
       sensorTimeoutMs: 12345,
       bypasses: ["AIDLC_SKIP_ARTIFACT_GUARD"],
     });
+    expect(harnessData(project).flags).toBeUndefined();
     const settings = JSON.parse(
       readFileSync(join(project, ".claude", "settings.json"), "utf-8"),
     ) as { env: Record<string, string> };
@@ -244,14 +257,19 @@ describe("t295 flags section", () => {
       data: {
         files: Array<{ file: string }>;
         record: { bypasses: string[] };
+        sources: Record<string, string>;
       };
     };
     expect(payload.data.files.map((entry) => entry.file)).toContain(
       join(project, ".claude", "settings.json"),
     );
+    expect(payload.data.files.map((entry) => entry.file)).toContain(
+      projectSettingsPath(project),
+    );
     expect(payload.data.record.bypasses).toEqual([
       "AIDLC_SKIP_ARTIFACT_GUARD",
     ]);
+    expect(payload.data.sources.AIDLC_USE_SWARM).toBe("project");
 
     const targetEnv: NodeJS.ProcessEnv = {
       ...process.env,
@@ -332,7 +350,7 @@ describe("t295 flags section", () => {
       project,
       "--yes",
     ], project, runtimeEnv()).status).toBe(0);
-    expect(readConfigDiagnosticRecords(join(project, ".claude")).flags)
+    expect(resolvedFlags(project))
       .toEqual(flags);
   }, 60_000);
 
@@ -348,11 +366,12 @@ describe("t295 flags section", () => {
       "flags",
       "--project-dir",
       project,
+      "--project",
       "--bypass",
       bypass,
       "--yes",
     ], project, runtimeEnv()).status).toBe(0);
-    expect(readConfigDiagnosticRecords(join(project, ".claude")).flags?.bypasses)
+    expect(resolvedFlags(project)?.bypasses)
       .toEqual([bypass]);
 
     expect(run([
@@ -360,11 +379,12 @@ describe("t295 flags section", () => {
       "flags",
       "--project-dir",
       project,
+      "--project",
       "--clear-bypass",
       bypass,
       "--yes",
     ], project, runtimeEnv()).status).toBe(0);
-    expect(readConfigDiagnosticRecords(join(project, ".claude")).flags?.bypasses)
+    expect(resolvedFlags(project)?.bypasses)
       .toBeUndefined();
 
     expect(run([
@@ -372,10 +392,11 @@ describe("t295 flags section", () => {
       "flags",
       "--project-dir",
       project,
+      "--project",
       "--reset",
       "--yes",
     ], project, runtimeEnv()).status).toBe(0);
-    expect(readConfigDiagnosticRecords(join(project, ".claude")).flags)
+    expect(resolvedFlags(project))
       .toBeNull();
     const shipped = JSON.parse(
       readFileSync(join(DIST_RELEASE, "claude", ".claude", "settings.json"), "utf-8"),
@@ -659,7 +680,6 @@ describe("t295 invariants", () => {
       runtime: null,
       providers: null,
       trust: null,
-      flags: null,
       project: null,
     });
     expect(readFileSync(join(project, ".claude", "settings.json"))).toEqual(

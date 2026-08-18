@@ -294,7 +294,7 @@ function scratchProject(): string {
     join(AIDLC_SRC, "hooks", "aidlc-plan-approval-guard.ts"),
     join(dir, ".claude", "hooks", "aidlc-plan-approval-guard.ts"),
   );
-  for (const t of ["aidlc-lib.ts", "aidlc-runtime-paths.ts", "aidlc-audit.ts"]) {
+  for (const t of ["aidlc-lib.ts", "aidlc-settings.ts", "aidlc-runtime-paths.ts", "aidlc-audit.ts"]) {
     cpSync(join(AIDLC_SRC, "tools", t), join(dir, ".claude", "tools", t));
   }
   mkdirSync(join(dir, RECORD_REL), { recursive: true });

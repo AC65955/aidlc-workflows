@@ -138,7 +138,6 @@ function emptyRecords(providers: ProvidersRecord | null): ConfigDiagnosticRecord
     runtime: null,
     providers,
     trust: null,
-    flags: null,
     project: null,
   };
 }
@@ -1265,7 +1264,6 @@ describe("t294 invariants", () => {
       runtime: null,
       providers: null,
       trust: null,
-      flags: null,
       project: null,
     });
     expect(readFileSync(join(project, ".claude", "settings.json"))).toEqual(

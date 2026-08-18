@@ -104,6 +104,12 @@ function copyCore(root: string, relativePath: string): void {
   const destination = join(root, ".aidlc", relativePath);
   mkdirSync(dirname(destination), { recursive: true });
   copyFileSync(source, destination);
+  if (relativePath === "tools/aidlc-lib.ts") {
+    copyFileSync(
+      join(REPO_ROOT, "core", "tools", "aidlc-settings.ts"),
+      join(root, ".aidlc", "tools", "aidlc-settings.ts"),
+    );
+  }
 }
 
 function fakeClient(parentBySession: Record<string, string | undefined> = {}) {

@@ -326,24 +326,42 @@ to be adopted; unknown bytes are never inferred as framework-owned.
 ### Model policy projection
 
 `aidlc config models` is a section under the existing public `config` command,
-not a seventh public command. Its record lives at `models` in `harness.json`:
+not a seventh public command. Policy lives in the shared settings hierarchy,
+not in harness metadata:
+
+- machine install root `aidlc.settings.json`
+- project-root `aidlc.settings.json`
+- project-root `aidlc.settings.local.json`
+
+Layers merge leaf-by-leaf in that order, then environment overrides win. The
+local file is personal and gitignored; the project file is team-shared.
 
 ```json
 {
   "schemaVersion": 1,
-  "preset": "thorough",
-  "groups": {
-    "reviewing": { "effort": "xhigh" }
-  },
-  "agents": {
-    "architect": { "effort": "xhigh", "model": "provider/raw-id" }
-  },
-  "profiles": {
-    "my-profile": {
-      "groups": {
-        "reviewing": { "effort": "medium" }
+  "models": {
+    "schemaVersion": 1,
+    "preset": "thorough",
+    "groups": {
+      "reviewing": { "effort": "xhigh" }
+    },
+    "agents": {
+      "architect": {
+        "effort": "xhigh",
+        "model": { "claude": "provider/raw-id" }
+      }
+    },
+    "profiles": {
+      "my-profile": {
+        "groups": {
+          "reviewing": { "effort": "medium" }
+        }
       }
     }
+  },
+  "flags": {
+    "schemaVersion": 1,
+    "swarm": true
   }
 }
 ```
@@ -355,10 +373,11 @@ The same surface writers are used at package time and config refresh time for
 Claude and Cursor Markdown, Codex TOML, opencode Markdown, and Kiro agent JSON
 plus `chat.modelDefaults`.
 
-Refresh merges the recorded `models` key into a pristine staged projection and
-rewrites model surfaces before `planManagedFiles` hashes staged bytes. A later
-plain `aidlc config` therefore reapplies the recorded policy, while manual edits
-to owned agent surfaces still produce normal refresh conflicts.
+Refresh passes the resolved settings chain into a pristine staged projection
+and rewrites model and flag surfaces before `planManagedFiles` hashes staged
+bytes. No policy key is copied into `harness.json`. A later plain
+`aidlc config` therefore reapplies the resolved policy, while manual edits to
+owned agent surfaces still produce normal refresh conflicts.
 
 Unsupported policy is explicit. The resolver reports harness honesty and
 clamps only downward to the nearest vocabulary value. It never writes a key the

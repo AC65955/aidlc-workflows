@@ -15,10 +15,16 @@ import { sha256Bytes } from "./aidlc-distribution.ts";
 import { discoverProjectHarnesses } from "./aidlc-runtime-paths.ts";
 import type { ModelHarness } from "./aidlc-model-policy.ts";
 import {
-  normalizeProjectFlagsRecord,
+  LOCAL_SETTINGS_FILE,
+  localSettingsPath,
+  machineSettingsPath,
+  projectSettingsPath,
   RECORDABLE_PROJECT_BYPASSES,
+  readSettingsTarget,
+  resolveAidlcSettings,
   type ProjectFlagsRecord,
-} from "./aidlc-lib.ts";
+  type ResolvedAidlcSettings,
+} from "./aidlc-settings.ts";
 
 export type RuntimeRecord = {
   schemaVersion: 1;
@@ -62,7 +68,6 @@ export type ConfigDiagnosticRecords = {
   runtime: RuntimeRecord | null;
   providers: ProvidersRecord | null;
   trust: TrustRecord | null;
-  flags: ProjectFlagsRecord | null;
   project: ProjectChoicesRecord | null;
 };
 
@@ -70,7 +75,6 @@ export type ConfigDiagnosticOverrides = {
   runtime?: RuntimeRecord | null;
   providers?: ProvidersRecord | null;
   trust?: TrustRecord | null;
-  flags?: ProjectFlagsRecord | null;
   project?: ProjectChoicesRecord | null;
   plugins?: string[] | null;
 };
@@ -368,14 +372,16 @@ export function normalizeProjectChoicesRecord(
 export function readConfigDiagnosticRecords(harnessRoot: string): ConfigDiagnosticRecords {
   const path = join(harnessRoot, "tools", "data", "harness.json");
   const value = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+  const policyKeys = ["models", "flags"].filter((key) => Object.hasOwn(value, key));
+  if (policyKeys.length > 0) {
+    throw new Error(
+      `${path}: harness.json contains policy key(s) ${policyKeys.join(", ")}; use aidlc.settings.json`,
+    );
+  }
   return {
     runtime: normalizeRuntimeRecord(value.runtime),
     providers: normalizeProvidersRecord(value.providers),
     trust: normalizeTrustRecord(value.trust),
-    flags: normalizeProjectFlagsRecord(
-      value.flags,
-      `${path}: harness.json field "flags"`,
-    ),
     project: normalizeProjectChoicesRecord(value.project),
   };
 }
@@ -1035,15 +1041,23 @@ function writeClaudeFlags(
   writeJson(path, value);
 }
 
+export function applyProjectFlagsToProjection(
+  projectionRoot: string,
+  harnessDir: string,
+  harness: ModelHarness,
+  record: ProjectFlagsRecord | null,
+): void {
+  if (record && harness === "claude") {
+    writeClaudeFlags(projectionRoot, harnessDir, record);
+  }
+}
+
 export function applyConfigDiagnosticRecords(
   projectionRoot: string,
   harnessDir: string,
   harness: ModelHarness,
   records: ConfigDiagnosticRecords,
 ): void {
-  if (records.flags && harness === "claude") {
-    writeClaudeFlags(projectionRoot, harnessDir, records.flags);
-  }
   const provider = records.providers;
   if (provider?.provider !== "amazon-bedrock" || !provider.region) return;
   if (harness === "claude") {
@@ -1174,11 +1188,20 @@ export function flagFiles(
   harnessDir: string,
   harness: ModelHarness,
   record: ProjectFlagsRecord | null,
+  resolved: ResolvedAidlcSettings = resolveAidlcSettings(projectDir),
 ): DiagnosticFileSetting[] {
-  const files: DiagnosticFileSetting[] = [{
-    setting: "recorded project flags",
-    file: join(projectDir, harnessDir, "tools", "data", "harness.json"),
-  }];
+  const files: DiagnosticFileSetting[] = [];
+  for (const [layer, info] of Object.entries(resolved.files)) {
+    if (!info.present) continue;
+    const target = layer === "machine" ? "global" : layer;
+    if (!readSettingsTarget(projectDir, target as "global" | "project" | "local")?.flags) {
+      continue;
+    }
+    files.push({
+      setting: `${layer} flag policy`,
+      file: info.path,
+    });
+  }
   if (record?.defaultScope && harness === "claude") {
     files.push({
       setting: "AWS_AIDLC_DEFAULT_SCOPE session environment",
@@ -2092,7 +2115,7 @@ export function flagsDoctorCheck(
     return { pass: true, label: "Flags: no installed project harness" };
   }
   try {
-    const record = readConfigDiagnosticRecords(selected.root).flags;
+    const record = resolveAidlcSettings(projectDir).flags;
     const issues = flagIssues(
       projectDir,
       selected.harnessDir,
@@ -2120,6 +2143,55 @@ export function flagsDoctorCheck(
       fix: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+export function settingsDoctorChecks(
+  projectDir: string,
+): DiagnosticDoctorCheck[] {
+  const checks: DiagnosticDoctorCheck[] = [];
+  for (const [target, path] of [
+    ["global", machineSettingsPath()],
+    ["project", projectSettingsPath(projectDir)],
+    ["local", localSettingsPath(projectDir)],
+  ] as const) {
+    if (!existsSync(path)) continue;
+    try {
+      readSettingsTarget(projectDir, target);
+      checks.push({
+        pass: true,
+        label: `Settings ${target}: ${path} is valid`,
+      });
+    } catch (error) {
+      checks.push({
+        pass: false,
+        label: `Settings ${target}: ${path} is invalid`,
+        fix: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  const local = localSettingsPath(projectDir);
+  if (existsSync(local) && existsSync(join(projectDir, ".git"))) {
+    const tracked = spawnSync(
+      "git",
+      ["ls-files", "--error-unmatch", "--", LOCAL_SETTINGS_FILE],
+      {
+        cwd: projectDir,
+        encoding: "utf-8",
+        timeout: 5_000,
+      },
+    ).status === 0;
+    checks.push({
+      pass: !tracked,
+      severity: tracked ? "warn" : undefined,
+      label: tracked
+        ? `Settings local: ${LOCAL_SETTINGS_FILE} is git-tracked`
+        : `Settings local: ${LOCAL_SETTINGS_FILE} is not git-tracked`,
+      fix: tracked
+        ? `remove ${LOCAL_SETTINGS_FILE} from git tracking and keep its .gitignore entry`
+        : undefined,
+    });
+  }
+  return checks;
 }
 
 export function workspaceSiblingDoctorCheck(

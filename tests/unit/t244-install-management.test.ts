@@ -35,6 +35,7 @@ import {
   readUpdateCache,
   refreshUpdateState,
 } from "../../core/tools/aidlc-update.ts";
+import { _resetSettingsCacheForTests } from "../../core/tools/aidlc-settings.ts";
 import { AIDLC_VERSION } from "../../core/tools/aidlc-version.ts";
 import { scanWindowsUninstallJournals } from "../../core/tools/aidlc-windows-uninstall.ts";
 import {
@@ -335,7 +336,7 @@ describe("t244 machine configuration and update discovery", () => {
     expect(rejected.status).toBe(2);
     expect(rejected.stdout + rejected.stderr).not.toContain("token=secret");
     expect(rejected.stdout + rejected.stderr).not.toContain("private");
-    expect(existsSync(join(machine, "config.json"))).toBe(false);
+    expect(existsSync(join(machine, "aidlc.settings.json"))).toBe(false);
   });
 
   test("doctor explicit refresh honors its mirror and quiet modes stay network-free", async () => {
@@ -553,6 +554,7 @@ describe("t244 machine configuration and update discovery", () => {
       "system",
       "config", "global", "set", "update-check", "off",
       ], REPO_ROOT, env).status).toBe(0);
+      _resetSettingsCacheForTests();
       expect((await refreshUpdateState(50)).state).toBe("disabled");
       const disabledCheck = await runAsync(
         DISPATCHER,
@@ -570,6 +572,7 @@ describe("t244 machine configuration and update discovery", () => {
       "system",
       "config", "global", "set", "offline", "on",
       ], REPO_ROOT, env).status).toBe(0);
+      _resetSettingsCacheForTests();
       expect((await refreshUpdateState(50)).state).toBe("offline");
       const offlineCheck = await runAsync(
         DISPATCHER,
@@ -887,13 +890,13 @@ describe("t244 management lifecycle", () => {
     expect(run(LIFECYCLE, ["uninstall", "--yes"], project, env).status).toBe(0);
     await waitForAbsent([join(machine, "versions"), command]);
     await waitForPresent([
-      join(machine, "config.json"),
+      join(machine, "aidlc.settings.json"),
       join(machine, "update-check.json"),
       join(machine, "pins.json"),
     ]);
     expect(existsSync(join(machine, "versions"))).toBe(false);
     expect(existsSync(command)).toBe(false);
-    expect(existsSync(join(machine, "config.json"))).toBe(true);
+    expect(existsSync(join(machine, "aidlc.settings.json"))).toBe(true);
     expect(existsSync(join(machine, "update-check.json"))).toBe(true);
     expect(existsSync(join(machine, "pins.json"))).toBe(true);
     expect(readFileSync(join(project, "keep.txt"), "utf-8")).toBe("project-owned\n");
@@ -906,14 +909,14 @@ describe("t244 management lifecycle", () => {
     await waitForAbsent([
       join(machine, "versions"),
       command,
-      join(machine, "config.json"),
+      join(machine, "aidlc.settings.json"),
       join(machine, "update-check.json"),
       join(machine, "pins.json"),
       join(machine, "default-harness"),
     ]);
     for (
       const path of [
-        "config.json",
+        "aidlc.settings.json",
         "update-check.json",
         "pins.json",
         "default-harness",

@@ -76,6 +76,7 @@ import {
 import { ROUTES } from "../core/tools/aidlc.ts";
 import { AIDLC_VERSION } from "../core/tools/aidlc-version.ts";
 import { sha256Bytes } from "../core/tools/aidlc-distribution.ts";
+import { AIDLC_SETTINGS_SCHEMA } from "../core/tools/aidlc-settings.ts";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CORE_ROOT = join(REPO_ROOT, "core");
@@ -403,6 +404,7 @@ const COMPILED_DATA = ["tools/data/stage-graph.json", "tools/data/scope-grid.jso
 // without a hardcoded map. Derived from the manifest, written into every tree.
 const HARNESS_DATA = "tools/data/harness.json";
 const AGENT_TIERS_DATA = "tools/data/agent-tiers.json";
+const SETTINGS_SCHEMA_DATA = "tools/data/aidlc-settings.schema.json";
 const STAMP_DATA = "tools/data/aidlc-stamp.json";
 const PROJECTION_DATA = "tools/data/aidlc-projection.json";
 
@@ -476,6 +478,12 @@ function writeAgentTiersData(treeRoot: string): void {
     dst,
     serializeAgentTiers(agentTiersFromAuthoredDirectory(join(CORE_ROOT, "agents"))),
   );
+}
+
+function writeSettingsSchemaData(treeRoot: string): void {
+  const dst = join(treeRoot, SETTINGS_SCHEMA_DATA);
+  mkdirSync(dirname(dst), { recursive: true });
+  writeFileSync(dst, `${JSON.stringify(AIDLC_SETTINGS_SCHEMA, null, 2)}\n`);
 }
 
 function writeProjectionData(outRoot: string, treeRoot: string, m: HarnessManifest): void {
@@ -791,6 +799,7 @@ function buildTree(
   //     like any other generated file.
   writeHarnessData(treeRoot, m);
   writeAgentTiersData(treeRoot);
+  writeSettingsSchemaData(treeRoot);
 
   // 4. Generate runners by composing aidlc-runner-gen's CLIs against the
   //    assembled tree (write + scopes). AIDLC_HARNESS_DIR steers harnessDir()

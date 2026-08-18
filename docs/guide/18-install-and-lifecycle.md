@@ -203,15 +203,36 @@ record a per-install Writing up downgrade.
 
 ```bash
 aidlc config models --show
-aidlc config models --reviewing-effort xhigh --yes
-aidlc config models --agent architect --effort xhigh --model provider/raw-id --yes
+aidlc config models --reviewing-effort xhigh --project --yes
+aidlc config models --agent architect --effort xhigh --model provider/raw-id --project --yes
 aidlc config models --check
-aidlc config models --reset --yes
+aidlc config models --reset --project --yes
 ```
 
 `--show --json` prints every agent's effective model, effort, and provenance.
 `--check` is the CI inverse and exits non-zero when the recorded policy is not
 fully reflected in the harness surfaces.
+
+Model and flag policy resolves leaf-by-leaf through this hierarchy:
+
+1. Shipped defaults in the tier and preset tables
+2. Machine `${AIDLC_INSTALL_ROOT:-~/.local/share/aidlc}/aidlc.settings.json`
+3. Project `aidlc.settings.json`
+4. Personal `aidlc.settings.local.json`
+5. Environment variables
+
+The project file is committed team policy. The local file is personal and is
+added to `.gitignore` when the config command creates it. Mutations require
+exactly one of `--project`, `--local`, or `--global`; the interactive wizard
+asks for the layer and recommends project policy inside a repository. Outside
+a recognized project only the machine layer is valid, so `--global` is
+inferred. `--show` labels each effective value with its winning source.
+
+All three files use one strict schema. Unknown keys fail closed, and
+update/release keys such as `offline` and `release-base-url` are machine-only.
+Editors can reference the generated
+`<harness>/tools/data/aidlc-settings.schema.json`; no defaults settings file is
+written.
 
 Three immutable effort-only presets ship:
 
@@ -226,7 +247,7 @@ Derive a project profile from a preset or an existing profile:
 
 ```bash
 aidlc config models --from thorough --reviewing-effort medium \
-  --save-as my-profile --yes
+  --save-as my-profile --project --yes
 ```
 
 Presets and profiles contain group efforts only. Raw model IDs are allowed only
@@ -361,16 +382,16 @@ hook debug, sensor timeout, and explicit guard bypasses:
 
 ```bash
 aidlc config flags --default-scope <installed-scope> \
-  --swarm on --hook-debug off --sensor-timeout-ms 90000 --yes
-aidlc config flags --bypass AIDLC_SKIP_ARTIFACT_GUARD --yes
+  --swarm on --hook-debug off --sensor-timeout-ms 90000 --project --yes
+aidlc config flags --bypass AIDLC_SKIP_ARTIFACT_GUARD --local --yes
 aidlc config flags --show
 aidlc config flags --check
-aidlc config flags --reset --yes
+aidlc config flags --reset --project --yes
 ```
 
 Real environment variables always win. Existing tools and hooks first read the
-environment and fall back to `flags` in `harness.json` only when the variable
-is absent. This keeps CI and one-shot shell exports scriptable.
+environment and then resolve local, project, and machine settings when the
+variable is absent. This keeps CI and one-shot shell exports scriptable.
 
 Default scope names are read from the installed scope files. The section does
 not branch on a built-in scope name, so scope renames and plugin scopes remain

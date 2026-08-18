@@ -28,6 +28,12 @@ import {
   type ModelPolicyRecord,
 } from "../../core/tools/aidlc-model-policy.ts";
 import { modelsPolicyCheck } from "../../core/tools/aidlc-doctor.ts";
+import {
+  invalidateSettingsCache,
+  modelPolicyForHarness,
+  projectSettingsPath,
+  resolveAidlcSettings,
+} from "../../core/tools/aidlc-settings.ts";
 
 const BUN = process.execPath;
 const INIT = join(REPO_ROOT, "core", "tools", "aidlc-init.ts");
@@ -91,6 +97,17 @@ function harnessData(project: string, harnessDir: string): Record<string, unknow
   return JSON.parse(
     readFileSync(join(project, harnessDir, "tools", "data", "harness.json"), "utf-8"),
   ) as Record<string, unknown>;
+}
+
+function projectSettings(project: string): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(projectSettingsPath(project), "utf-8"),
+  ) as Record<string, unknown>;
+}
+
+function resolvedPolicy(project: string, harness: "claude" | "kiro") {
+  invalidateSettingsCache();
+  return modelPolicyForHarness(resolveAidlcSettings(project).models, harness);
 }
 
 describe("t293 model policy resolution", () => {
@@ -371,15 +388,17 @@ describe("t293 config models CLI", () => {
         "models",
         "--project-dir",
         project,
+        "--project",
         "--preset",
         preset,
         "--yes",
       ], project, runtimeEnv());
       expect(applied.status, applied.stdout + applied.stderr).toBe(0);
-      expect(harnessData(project, ".claude").models).toEqual({
+      expect(projectSettings(project).models).toEqual({
         schemaVersion: 1,
         preset,
       });
+      expect(harnessData(project, ".claude").models).toBeUndefined();
       expect(readFileSync(reviewer, "utf-8")).toContain(
         `effort: ${reviewerEffort}`,
       );
@@ -393,6 +412,7 @@ describe("t293 config models CLI", () => {
       "models",
       "--project-dir",
       project,
+      "--project",
       "--preset",
       "balanced",
       "--yes",
@@ -425,6 +445,7 @@ describe("t293 config models CLI", () => {
         "models",
         "--project-dir",
         project,
+        "--project",
         sourceFlag,
         "economical",
         "--yes",
@@ -434,7 +455,7 @@ describe("t293 config models CLI", () => {
         "thorough, balanced, minimal",
       );
     }
-    expect(harnessData(project, ".claude").models).toEqual({
+    expect(projectSettings(project).models).toEqual({
       schemaVersion: 1,
       preset: "balanced",
     });
@@ -467,6 +488,7 @@ describe("t293 config models CLI", () => {
       "models",
       "--project-dir",
       project,
+      "--project",
       "--reviewing-effort",
       "xhigh",
     ], project, runtimeEnv());
@@ -478,6 +500,7 @@ describe("t293 config models CLI", () => {
       "models",
       "--project-dir",
       project,
+      "--project",
       "--reviewing-effort",
       "xhigh",
       "--yes",
@@ -498,7 +521,9 @@ describe("t293 config models CLI", () => {
       "--show",
     ], project, runtimeEnv());
     expect(shown.status).toBe(0);
-    expect(shown.stdout).toContain("product-lead [Reviewing] sonnet/xhigh");
+    expect(shown.stdout).toContain(
+      "product-lead [Reviewing] sonnet (shipped default)/xhigh (project)",
+    );
     expect(shown.stdout).toContain("provenance: group-dial");
 
     const shownJson = run([
@@ -510,10 +535,23 @@ describe("t293 config models CLI", () => {
       "--json",
     ], project, runtimeEnv());
     const showPayload = JSON.parse(shownJson.stdout) as {
-      data: { effective: Array<{ agent: string; layer: string; effort?: string }> };
+      data: {
+        effective: Array<{
+          agent: string;
+          layer: string;
+          effort?: string;
+          modelSource: string;
+          effortSource: string;
+        }>;
+      };
     };
     expect(showPayload.data.effective.find((item) => item.agent === "product-lead"))
-      .toEqual(expect.objectContaining({ layer: "group-dial", effort: "xhigh" }));
+      .toEqual(expect.objectContaining({
+        layer: "group-dial",
+        effort: "xhigh",
+        modelSource: "shipped default",
+        effortSource: "project",
+      }));
 
     expect(run([
       "config",
@@ -561,10 +599,12 @@ describe("t293 config models CLI", () => {
       "models",
       "--project-dir",
       project,
+      "--project",
       "--reset",
       "--yes",
     ], project, runtimeEnv());
     expect(reset.status, reset.stdout + reset.stderr).toBe(0);
+    expect(existsSync(projectSettingsPath(project))).toBe(false);
     expect(harnessData(project, ".claude").models).toBeUndefined();
     expect(readFileSync(reviewer, "utf-8")).toContain("effort: medium");
 
@@ -573,6 +613,7 @@ describe("t293 config models CLI", () => {
       "models",
       "--project-dir",
       project,
+      "--project",
       "--from",
       "thorough",
       "--reviewing-effort",
@@ -582,7 +623,7 @@ describe("t293 config models CLI", () => {
       "--yes",
     ], project, runtimeEnv());
     expect(profile.status, profile.stdout + profile.stderr).toBe(0);
-    const profilePolicy = harnessData(project, ".claude").models as {
+    const profilePolicy = projectSettings(project).models as {
       profiles: Record<string, unknown>;
     };
     expect(profilePolicy.profiles["my-profile"]).toEqual({
@@ -595,6 +636,7 @@ describe("t293 config models CLI", () => {
       "models",
       "--project-dir",
       project,
+      "--project",
       "--reset",
       "--yes",
     ], project, runtimeEnv()).status).toBe(0);
@@ -603,6 +645,7 @@ describe("t293 config models CLI", () => {
       "models",
       "--project-dir",
       project,
+      "--project",
       "--agent",
       "architect",
       "--effort",
@@ -668,12 +711,14 @@ describe("t293 config models CLI", () => {
       "models",
       "--project-dir",
       project,
+      "--project",
       "--reviewing-effort",
       "xhigh",
       "--yes",
     ], project, runtimeEnv());
     expect(result.status).toBe(4);
     expect(result.stdout).toContain("refusing to refresh while 1 workflow(s) are active");
+    expect(existsSync(projectSettingsPath(project))).toBe(false);
     expect(harnessData(project, ".claude").models).toBeUndefined();
   }, 60_000);
 
@@ -684,6 +729,7 @@ describe("t293 config models CLI", () => {
       "models",
       "--project-dir",
       project,
+      "--project",
       "--reviewing-effort",
       "xhigh",
       "--yes",
@@ -693,13 +739,17 @@ describe("t293 config models CLI", () => {
       "Kiro CLI cannot express group effort dials today",
     );
     expect(unsupported.stdout).not.toContain("roughly 9x");
-    expect(modelPolicySurfaceDrift(project, ".kiro", "kiro").length).toBeGreaterThan(0);
+    const unsupportedPolicy = resolvedPolicy(project, "kiro");
+    expect(
+      modelPolicySurfaceDrift(project, ".kiro", "kiro", unsupportedPolicy).length,
+    ).toBeGreaterThan(0);
 
     expect(run([
       "config",
       "models",
       "--project-dir",
       project,
+      "--project",
       "--reset",
       "--yes",
     ], project, runtimeEnv()).status).toBe(0);
@@ -708,6 +758,7 @@ describe("t293 config models CLI", () => {
       "models",
       "--project-dir",
       project,
+      "--project",
       "--agent",
       "architect",
       "--effort",
@@ -730,7 +781,12 @@ describe("t293 config models CLI", () => {
     expect(
       cli["chat.modelDefaults"]["vendor/kiro-model"].output_config?.effort,
     ).toBe("max");
-    expect(modelPolicySurfaceDrift(project, ".kiro", "kiro")).toEqual([]);
+    expect(modelPolicySurfaceDrift(
+      project,
+      ".kiro",
+      "kiro",
+      resolvedPolicy(project, "kiro"),
+    )).toEqual([]);
   }, 60_000);
 });
 
@@ -738,37 +794,38 @@ describe("t293 doctor model policy advisory", () => {
   test("doctor reports orphaned exceptions and inexpressible selected-harness policy", () => {
     const claudeProject = temp("aidlc-t293-doctor-claude-");
     cpSync(join(DIST, "claude"), claudeProject, { recursive: true });
-    const claudeDataPath = join(
-      claudeProject,
-      ".claude",
-      "tools",
-      "data",
-      "harness.json",
-    );
-    const claudeData = JSON.parse(readFileSync(claudeDataPath, "utf-8"));
-    claudeData.models = {
+    const claudeSettings = projectSettingsPath(claudeProject);
+    writeFileSync(claudeSettings, `${JSON.stringify({
       schemaVersion: 1,
-      agents: { "removed-agent": { effort: "high" } },
-    };
-    writeFileSync(claudeDataPath, `${JSON.stringify(claudeData, null, 2)}\n`);
-    expect(modelPolicyDoctorIssues(join(claudeProject, ".claude"), "claude"))
+      models: {
+        schemaVersion: 1,
+        agents: { "removed-agent": { effort: "high" } },
+      },
+    }, null, 2)}\n`);
+    invalidateSettingsCache(claudeSettings);
+    expect(modelPolicyDoctorIssues(
+      join(claudeProject, ".claude"),
+      "claude",
+      resolvedPolicy(claudeProject, "claude"),
+    ))
       .toContain("orphaned agent exception: removed-agent");
 
     const cursorProject = temp("aidlc-t293-doctor-cursor-");
     cpSync(join(DIST, "cursor"), cursorProject, { recursive: true });
-    const cursorDataPath = join(
-      cursorProject,
-      ".cursor",
-      "tools",
-      "data",
-      "harness.json",
-    );
-    const cursorData = JSON.parse(readFileSync(cursorDataPath, "utf-8"));
-    cursorData.models = {
+    const cursorSettings = projectSettingsPath(cursorProject);
+    writeFileSync(cursorSettings, `${JSON.stringify({
       schemaVersion: 1,
-      agents: { architect: { model: "vendor/raw", effort: "high" } },
-    };
-    writeFileSync(cursorDataPath, `${JSON.stringify(cursorData, null, 2)}\n`);
+      models: {
+        schemaVersion: 1,
+        agents: {
+          architect: {
+            model: { cursor: "vendor/raw" },
+            effort: "high",
+          },
+        },
+      },
+    }, null, 2)}\n`);
+    invalidateSettingsCache(cursorSettings);
     const check = modelsPolicyCheck(cursorProject, true);
     expect(check.pass).toBe(false);
     expect(check.severity).toBe("warn");

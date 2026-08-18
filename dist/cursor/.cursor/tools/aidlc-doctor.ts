@@ -35,8 +35,13 @@ import {
 import {
   flagsDoctorCheck,
   providerDoctorCheck,
+  settingsDoctorChecks,
   workspaceSiblingDoctorCheck,
 } from "./aidlc-config-diagnostics.ts";
+import {
+  modelPolicyForHarness,
+  resolveAidlcSettings,
+} from "./aidlc-settings.ts";
 
 function windowsRecoveryCheck(): DoctorCheck | null {
   if (process.platform !== "win32") return null;
@@ -130,6 +135,7 @@ export function modelsPolicyCheck(projectDir: string, verbose: boolean): DoctorC
       label: "Models: no installed project harness",
     };
   }
+  const resolved = resolveAidlcSettings(projectDir);
   const issues: string[] = [];
   for (const harness of harnesses) {
     if (!isModelHarness(harness.distribution)) {
@@ -138,7 +144,11 @@ export function modelsPolicyCheck(projectDir: string, verbose: boolean): DoctorC
     }
     try {
       issues.push(
-        ...modelPolicyDoctorIssues(harness.root, harness.distribution)
+        ...modelPolicyDoctorIssues(
+          harness.root,
+          harness.distribution,
+          modelPolicyForHarness(resolved.models, harness.distribution),
+        )
           .map((issue) => `${harness.distribution}: ${issue}`),
       );
     } catch (error) {
@@ -271,6 +281,7 @@ export async function main(argv: string[]): Promise<void> {
   if (recovery) checks.push(recovery);
   checks.push(updateCheck(update));
   checks.push(pluginCheck(projectDir, flags.verbose === "true"));
+  checks.push(...settingsDoctorChecks(projectDir));
   checks.push(modelsPolicyCheck(projectDir, flags.verbose === "true"));
   checks.push(flagsDoctorCheck(projectDir, harnessDir()));
   checks.push(providerDoctorCheck(projectDir, harnessDir()));

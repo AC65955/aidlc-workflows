@@ -145,7 +145,7 @@ Project agent model policy is a section under config:
 
 ```bash
 aidlc config models --show
-aidlc config models --reviewing-effort xhigh --yes
+aidlc config models --reviewing-effort xhigh --project --yes
 aidlc config models --check
 ```
 

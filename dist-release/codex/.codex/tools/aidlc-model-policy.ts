@@ -578,12 +578,6 @@ export function writeKiroCliSurface(
   return `${JSON.stringify(parsed, null, 2)}\n`;
 }
 
-function readHarnessPolicy(harnessRoot: string): ModelPolicyRecord | null {
-  const path = join(harnessRoot, "tools", "data", "harness.json");
-  const data = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
-  return normalizeModelPolicy(data.models);
-}
-
 export function applyModelPolicyToProjection(
   projectionRoot: string,
   harnessDir: string,
@@ -592,7 +586,7 @@ export function applyModelPolicyToProjection(
   capValue?: Tier | null,
 ): EffectiveModelPolicy[] {
   const harnessRoot = join(projectionRoot, harnessDir);
-  const policy = policyValue === undefined ? readHarnessPolicy(harnessRoot) : policyValue;
+  const policy = policyValue ?? null;
   const tiers = readAgentTiers(harnessRoot);
   const cap = capValue === undefined
     ? resolveTierCap(join(projectionRoot, "aidlc", "spaces", "default", "memory"))
@@ -692,9 +686,10 @@ export function modelPolicySurfaceDrift(
   projectDir: string,
   harnessDir: string,
   harness: ModelHarness,
+  policyValue: ModelPolicyRecord | null,
 ): string[] {
   const harnessRoot = join(projectDir, harnessDir);
-  const policy = readHarnessPolicy(harnessRoot);
+  const policy = normalizeModelPolicy(policyValue);
   const tiers = readAgentTiers(harnessRoot);
   const cap = resolveTierCap(join(projectDir, "aidlc", "spaces", "default", "memory"));
   const issues: string[] = [];
@@ -773,8 +768,9 @@ export function modelPolicySurfaceDrift(
 export function modelPolicyDoctorIssues(
   harnessRoot: string,
   harness: ModelHarness,
+  policyValue: ModelPolicyRecord | null,
 ): string[] {
-  const policy = readHarnessPolicy(harnessRoot);
+  const policy = normalizeModelPolicy(policyValue);
   if (!policy) return [];
   const tiers = readAgentTiers(harnessRoot);
   const issues = Object.keys(policy.agents ?? {})
