@@ -213,10 +213,14 @@ aidlc config models --reset --yes
 `--check` is the CI inverse and exits non-zero when the recorded policy is not
 fully reflected in the harness surfaces.
 
-Two immutable presets ship:
+Three immutable effort-only presets ship:
 
 - `thorough`: reviewing effort xhigh
-- `economical`: reviewing effort medium, writing-up effort low
+- `balanced`: reviewing effort medium, explicitly matching the shipped default
+- `minimal`: reviewing effort medium, writing-up effort low
+
+Presets never set model IDs or deciding effort. Deciding work continues to
+inherit the session ceiling.
 
 Derive a project profile from a preset or an existing profile:
 

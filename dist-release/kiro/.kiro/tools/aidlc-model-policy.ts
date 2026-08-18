@@ -92,14 +92,18 @@ export type EffectiveModelPolicy = {
 const thoroughGroups = Object.freeze({
   reviewing: Object.freeze({ effort: "xhigh" as const }),
 });
-const economicalGroups = Object.freeze({
+const balancedGroups = Object.freeze({
+  reviewing: Object.freeze({ effort: "medium" as const }),
+});
+const minimalGroups = Object.freeze({
   reviewing: Object.freeze({ effort: "medium" as const }),
   "writing-up": Object.freeze({ effort: "low" as const }),
 });
 
 export const MODEL_PRESETS = Object.freeze({
   thorough: Object.freeze({ groups: thoroughGroups }),
-  economical: Object.freeze({ groups: economicalGroups }),
+  balanced: Object.freeze({ groups: balancedGroups }),
+  minimal: Object.freeze({ groups: minimalGroups }),
 });
 
 export type ModelPresetName = keyof typeof MODEL_PRESETS;

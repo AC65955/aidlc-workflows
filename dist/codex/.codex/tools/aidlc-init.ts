@@ -375,7 +375,8 @@ function modelPolicyHelp(): string {
     "Judgment and Writing up inherit by default; the balanced reviewer baseline is the disclosed shipped step-down.",
     "",
     "Policy:",
-    "  --preset <thorough|economical>",
+    "  --preset <thorough|balanced|minimal>",
+    "    balanced explicitly matches the shipped reviewing default",
     "  --from <preset|profile> [--save-as <name>]",
     "  --deciding-effort <low|medium|high|xhigh|max>",
     "  --reviewing-effort <low|medium|high|xhigh|max>",
@@ -644,7 +645,10 @@ function modelsWizard(
   )?.trim();
   if (!choice) return current;
   if (choice === "1") {
-    const selected = prompt("Preset [thorough/economical]:")?.trim() ?? "";
+    process.stdout.write(
+      "Presets: thorough raises reviewing to xhigh; balanced matches the shipped reviewing default; minimal also lowers Writing up to low.\n",
+    );
+    const selected = prompt("Preset [thorough/balanced/minimal]:")?.trim() ?? "";
     if (!isModelPreset(selected)) throw new Error("preset selection cancelled");
     return applyModelsFlags(current, ["--preset", selected], tiers);
   }
