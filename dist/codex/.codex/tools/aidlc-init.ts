@@ -451,12 +451,15 @@ function validateModelsArgs(argv: readonly string[]): string | null {
 
 function modelPolicyHelp(): string {
   return [
-    "Usage: aidlc config models [options]",
+    "Choose model and effort policy for each agent",
+    "",
+    "USAGE",
+    "  aidlc config models [flags]",
     "",
     "Pins bind in both directions: a pinned agent stays pinned if the session later moves to a larger model.",
     "Judgment and Writing up inherit by default; the balanced reviewer baseline is the disclosed shipped step-down.",
     "",
-    "Policy:",
+    "POLICY",
     "  --preset <thorough|balanced|minimal>",
     "    balanced explicitly matches the shipped reviewing default",
     "  --from <preset|profile> [--save-as <name>]",
@@ -466,19 +469,24 @@ function modelPolicyHelp(): string {
     "  --agent <name> --effort <value> [--model <raw-id>]",
     "  --reset",
     "",
-    "Write target (required for mutations):",
+    "WRITE TARGET",
     "  --project  committed team policy (recommended in a repository)",
     "  --local    personal project policy in aidlc.settings.local.json",
     "  --global   machine policy in the install-root aidlc.settings.json",
     "Outside an installed project, --global is the only valid target and is inferred.",
     "",
-    "Inspection:",
+    "INSPECTION",
     "  --show [--json]",
     "  --check",
     "",
-    "Mutation control:",
+    "MUTATION CONTROL",
     "  --dry-run",
     "  --yes",
+    "",
+    "EXAMPLE",
+    "  aidlc config models --preset thorough --project --yes",
+    "",
+    "Run 'aidlc config models --show' to inspect the effective result.",
   ].join("\n");
 }
 
@@ -895,11 +903,23 @@ function diagnosticHelp(section: DiagnosticSection): string {
         "Trust is read, verified, and instructed. This section never regenerates trust seeds or permission rules.",
       ];
   return [
-    `Usage: aidlc config ${section} [options]`,
+    section === "runtime"
+      ? "Check and record the non-interactive hook runtime"
+      : section === "providers"
+      ? "Record model-provider choices and pending manual actions"
+      : "Review host trust and command allowlists",
+    "",
+    "USAGE",
+    `  aidlc config ${section} [flags]`,
     "",
     ...specific,
     "",
     ...common,
+    "",
+    "EXAMPLE",
+    `  aidlc config ${section} --show`,
+    "",
+    `Run 'aidlc config ${section} --check' for a non-writing verification.`,
   ].join("\n");
 }
 
@@ -1839,18 +1859,28 @@ function choiceHelp(section: ChoiceSection): string {
         "--yes confirms but never implies MCP consent. Without an explicit answer, MCP consent records none.",
       ];
   return [
-    `Usage: aidlc config ${section} [options]`,
+    section === "flags"
+      ? "Record project defaults and explicit guard bypasses"
+      : "Choose plugins, MCP servers, and shell completions",
+    "",
+    "USAGE",
+    `  aidlc config ${section} [flags]`,
     "",
     ...specific,
     "",
-    "Inspection:",
+    "INSPECTION",
     "  --show [--json]",
     "  --check",
     "",
-    "Mutation control:",
+    "MUTATION CONTROL",
     "  --reset",
     "  --dry-run",
     "  --yes",
+    "",
+    "EXAMPLE",
+    `  aidlc config ${section} --show`,
+    "",
+    `Run 'aidlc config ${section} --check' for a non-writing verification.`,
   ].join("\n");
 }
 
@@ -4848,6 +4878,42 @@ export async function main(
     "project",
   ]);
   if (section && !validSections.has(section.value)) {
+    if (configInputIsTty() && options.mode === "human") {
+      const distance = (left: string, right: string): number => {
+        const row = Array.from({ length: right.length + 1 }, (_, index) => index);
+        for (let i = 1; i <= left.length; i++) {
+          let diagonal = row[0];
+          row[0] = i;
+          for (let j = 1; j <= right.length; j++) {
+            const prior = row[j];
+            row[j] = Math.min(
+              row[j] + 1,
+              row[j - 1] + 1,
+              diagonal + (left[i - 1] === right[j - 1] ? 0 : 1),
+            );
+            diagonal = prior;
+          }
+        }
+        return row[right.length];
+      };
+      const nearest = [...validSections]
+        .map((candidate) => ({
+          candidate,
+          distance: distance(section.value, candidate),
+        }))
+        .sort((left, right) =>
+          left.distance - right.distance ||
+          left.candidate.localeCompare(right.candidate)
+        )[0];
+      process.stderr.write(`error: unknown config section '${section.value}'\n`);
+      if (nearest && nearest.distance <= 2) {
+        process.stderr.write(`\n  tip: did you mean '${nearest.candidate}'?\n`);
+      }
+      process.stderr.write("\nusage: aidlc config <section> [flags]\n");
+      process.stderr.write("For the full list, run 'aidlc config --help'.\n");
+      process.exitCode = EXIT.usage;
+      return;
+    }
     emitResult(
       usage(
         `unknown config section ${JSON.stringify(section.value)}; valid sections: models, runtime, providers, trust, flags, project`,

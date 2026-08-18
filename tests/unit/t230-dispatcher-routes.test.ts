@@ -541,7 +541,7 @@ describe("t230 dispatcher route parity", () => {
     ]) {
       const routed = viaDispatcher(args, REPO_ROOT);
       expect(routed.exitCode, args.join(" ")).toBe(2);
-      expect(routed.stderr.toString()).toContain("unknown command or noun");
+      expect(routed.stderr.toString()).toContain(`error: unknown command '${args[0]}'`);
     }
   });
 
@@ -1300,6 +1300,16 @@ describe("t230 dispatcher route completeness", () => {
 });
 
 describe("t230 dispatcher help and errors", () => {
+  test("bare aidlc, -h, and --help are identical successful help", () => {
+    const expected = renderHumanHelp();
+    for (const args of [[], ["-h"], ["--help"]]) {
+      const result = viaDispatcher(args, REPO_ROOT);
+      expect(result.exitCode, args.join(" ") || "bare").toBe(0);
+      expect(result.stdout.toString("utf-8")).toBe(expected);
+      expect(result.stderr.toString("utf-8")).toBe("");
+    }
+  });
+
   test("all six public commands have side-effect-free registry-derived help", () => {
     const projectDir = makeProject();
     const machineRoot = join(projectDir, "machine-help-probe");
@@ -1311,12 +1321,12 @@ describe("t230 dispatcher help and errors", () => {
       AIDLC_DISPATCH_TOOLS_DIR: join(projectDir, "missing-tools"),
     };
     const usage: Record<(typeof PUBLIC_COMMANDS)[number], string> = {
-      config: "Usage: aidlc config [options]",
-      doctor: "Usage: aidlc doctor [options]",
-      version: "Usage: aidlc version [--json]",
-      update: "Usage: aidlc update [options]",
-      use: "Usage: aidlc use <version> [options]",
-      uninstall: "Usage: aidlc uninstall [options]",
+      config: "config <section> [flags]",
+      doctor: "doctor [options]",
+      version: "version [--json]",
+      update: "update [options]",
+      use: "use <version> [options]",
+      uninstall: "uninstall [options]",
     };
     for (const command of PUBLIC_COMMANDS) {
       const rendered = renderCommandHelp(command);
@@ -1327,9 +1337,9 @@ describe("t230 dispatcher help and errors", () => {
         candidate.verbs.includes(command)
       );
       expect(route).toBeDefined();
-      for (const form of route?.all ?? []) {
-        expect(rendered).toContain(`aidlc ${form}`);
-      }
+      expect(rendered).toContain("USAGE");
+      expect(rendered).toContain(usage[command]);
+      expect(rendered).toContain("--help");
 
       for (const args of [[command, "--help"], [command, "-h"]]) {
         const dev = viaDispatcher(args, projectDir, env);
@@ -1344,7 +1354,9 @@ describe("t230 dispatcher help and errors", () => {
         env,
       );
       expect(compiled.exitCode, `compiled ${command}`).toBe(0);
-      expect(compiled.stdout.toString("utf-8")).toBe(rendered);
+      expect(compiled.stdout.toString("utf-8")).toBe(
+        rendered.replaceAll("bun .claude/tools/aidlc.ts", "aidlc"),
+      );
       expect(compiled.stderr.toString("utf-8")).toBe("");
     }
     expect(entriesUnder(machineRoot)).toEqual([]);
@@ -1356,28 +1368,20 @@ describe("t230 dispatcher help and errors", () => {
     expect(config.exitCode).toBe(0);
     const text = config.stdout.toString("utf-8");
     for (const section of ["models", "runtime", "providers", "trust", "flags", "project"]) {
-      expect(text).toContain(`config ${section}`);
+      expect(text).toMatch(new RegExp(`^  ${section}\\s+`, "m"));
       const sectionHelp = viaDispatcher(
         ["config", section, "--help"],
         projectDir,
       );
       expect(sectionHelp.exitCode, section).toBe(0);
       expect(sectionHelp.stdout.toString("utf-8"), section)
-        .toContain(`Usage: aidlc config ${section}`);
+        .toContain(`aidlc config ${section} [flags]`);
     }
     for (const flag of [
-      "--harness",
-      "--from",
-      "--mcp",
       "--pin",
-      "--unpin",
+      "--show",
       "--dry-run",
       "--yes",
-      "--json",
-      "--quiet",
-      "--force",
-      "--plan-token",
-      "--project-dir",
     ]) {
       expect(text).toContain(flag);
     }
@@ -1386,10 +1390,13 @@ describe("t230 dispatcher help and errors", () => {
   test("human help stays short and hides plumbing nouns", () => {
     const text = renderHumanHelp();
     expect(text.trimEnd().split("\n").length).toBeLessThanOrEqual(30);
-    const commands = text.split("\n")
-      .filter((line) => line.startsWith("  "))
-      .map((line) => line.trim().split(/\s+/)[0]);
-    expect(commands).toEqual(["config", "doctor", "version", "update", "use", "uninstall"]);
+    expect(text).toContain("SET UP A PROJECT");
+    expect(text).toContain("MANAGE THE MACHINE INSTALL");
+    expect(text).toContain("EXAMPLES");
+    expect(text).toContain("LEARN MORE");
+    for (const command of ["config", "doctor", "update", "use", "version", "uninstall"]) {
+      expect(text).toContain(`  ${command}`);
+    }
     for (const noun of [
       "state",
       "audit",
@@ -1475,7 +1482,28 @@ describe("t230 dispatcher help and errors", () => {
     const res = viaDispatcher(["bogus"], REPO_ROOT);
     expect(res.exitCode).toBe(2);
     expect(res.stdout.toString("utf-8")).toBe("");
-    expect(res.stderr.toString("utf-8")).toBe("aidlc: unknown command or noun 'bogus'; try 'aidlc --help'\n");
+    expect(res.stderr.toString("utf-8")).toBe(
+      "error: unknown command 'bogus'\n\nusage: aidlc <command> [flags]\nFor the full list, run 'aidlc --help'.\n",
+    );
+    const suggestion = viaDispatcher(["confg"], REPO_ROOT);
+    expect(suggestion.exitCode).toBe(2);
+    expect(suggestion.stderr.toString("utf-8")).toBe(
+      "error: unknown command 'confg'\n\n  tip: did you mean 'config'?\n\nusage: aidlc <command> [flags]\nFor the full list, run 'aidlc --help'.\n",
+    );
+  });
+
+  test("unknown config sections use the contextual suggestion", () => {
+    const result = viaDispatcher(["config", "modles"], makeProject(), {
+      AIDLC_TEST_CONFIG_TTY: "1",
+    });
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout.toString("utf-8")).toBe("");
+    expect(result.stderr.toString("utf-8")).toBe(
+      "error: unknown config section 'modles'\n\n" +
+        "  tip: did you mean 'models'?\n\n" +
+        "usage: aidlc config <section> [flags]\n" +
+        "For the full list, run 'aidlc config --help'.\n",
+    );
   });
 
   test("unknown engine noun verb points to engine help", () => {

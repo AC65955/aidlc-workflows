@@ -11,6 +11,7 @@ import {
 } from "./aidlc-command.ts";
 import { AIDLC_VERSION } from "./aidlc-version.ts";
 import {
+  aidlcInvocation,
   discoverProjectHarnesses,
   isCompiledExecutable,
   packagedDistributionRoot,
@@ -148,15 +149,6 @@ export const SLASH_FLAG_ALIASES: readonly Alias[] = [
   { from: "--scope", to: "next --scope", irregular: true },
   { from: "config-change", to: "config set", irregular: true },
   { from: "space-create", to: "space create", irregular: true },
-];
-
-const HUMAN_HELP: readonly HelpLine[] = [
-  { command: "config [args]", summary: "configure, pin, or refresh this project" },
-  { command: "doctor [args]", summary: "run machine and project diagnostics" },
-  { command: "version [--json]", summary: "print binary and runtime versions" },
-  { command: "update [args]", summary: "install and activate a framework release" },
-  { command: "use <version>", summary: "select an exact machine release" },
-  { command: "uninstall [--purge]", summary: "remove the machine installation" },
 ];
 
 export const PUBLIC_COMMANDS = [
@@ -926,7 +918,7 @@ export type Action =
   | { type: "version"; json: boolean }
   | { type: "stub"; message: string; code: number }
   | { type: "help"; scope: "human" | "engine" | "system" | "all" }
-  | { type: "error"; message: string; code: number };
+  | { type: "error"; message: string; humanMessage?: string; code: number };
 
 function text(fd: number, value: string | Uint8Array): void {
   if (typeof value === "string") {
@@ -1014,12 +1006,34 @@ export function listRoutes(): readonly Route[] {
 }
 
 export function renderHumanHelp(): string {
-  const lines: string[] = ["aidlc <command> [args]", "", "Commands:"];
-  const width = Math.max(...HUMAN_HELP.map((line) => line.command.length));
-  for (const line of HUMAN_HELP) {
-    lines.push(`  ${line.command.padEnd(width)}  ${line.summary}`);
-  }
-  return `${lines.join("\n")}\n`;
+  const invoke = aidlcInvocation();
+  return [
+    "aidlc - structured AI-driven development for your coding agent",
+    "",
+    "USAGE",
+    `  ${invoke} <command> [flags]`,
+    "",
+    "SET UP A PROJECT",
+    "  config      Set up, refresh, or pin this project (run bare for the guided setup)",
+    "  doctor      Check this machine and project, with fixes for anything wrong",
+    "",
+    "MANAGE THE MACHINE INSTALL",
+    "  update      Install and switch to a newer release",
+    "  use         Switch to an exact installed release",
+    "  version     Print binary and runtime versions",
+    "  uninstall   Remove aidlc from this machine",
+    "",
+    "EXAMPLES",
+    `  $ ${invoke} config                     guided setup in the current project`,
+    `  $ ${invoke} config models --show       see which model each agent uses, and why`,
+    `  $ ${invoke} doctor                     find out why something isn't working`,
+    "",
+    "LEARN MORE",
+    `  Use '${invoke} <command> --help' for more about a command.`,
+    "  Docs: https://awslabs.github.io/aidlc-workflows/",
+    `  Agents: workflows run through '${invoke} engine' - see '${invoke} engine --help'.`,
+    "",
+  ].join("\n");
 }
 
 const COMMAND_HELP_USAGE: Record<PublicCommand, string> = {
@@ -1031,36 +1045,6 @@ const COMMAND_HELP_USAGE: Record<PublicCommand, string> = {
   uninstall: "aidlc uninstall [options]",
 };
 
-const COMMAND_HELP_NOTES: Record<PublicCommand, readonly string[]> = {
-  config: [
-    "Sections: models, runtime, providers, trust, flags, project.",
-    "Run `aidlc config <section> --help` for section-specific choices.",
-    "A bare human TTY run shows the first-run setup map after a successful apply.",
-  ],
-  doctor: [
-    "Project diagnostics are read-only.",
-    "Non-TTY, JSON, and quiet runs are cache-only unless --check-updates is explicit.",
-    "Interactive human runs may refresh stale update metadata within 750 ms.",
-  ],
-  version: [
-    "Prints the binary version and the selected runtime version.",
-    "Requires no project or machine installation state.",
-  ],
-  update: [
-    "Installs and activates a release; --dry-run plans without activation.",
-    "`aidlc update --check` uses a 15-second metadata budget.",
-    "Ambient update notices elsewhere are cache-only.",
-  ],
-  use: [
-    "Selects an exact retained release, acquiring it first when needed.",
-    "Project files are not refreshed; run `aidlc config` between workflows.",
-  ],
-  uninstall: [
-    "Removes the per-user installation and never changes project trees.",
-    "--purge also removes machine configuration and cache; --yes confirms.",
-  ],
-};
-
 export function renderCommandHelp(command: PublicCommand): string {
   const route = ROUTES.find((candidate) =>
     candidate.namespace === "public" &&
@@ -1068,20 +1052,64 @@ export function renderCommandHelp(command: PublicCommand): string {
     candidate.verbs.includes(command)
   );
   if (!route) throw new Error(`dispatcher route registry is missing public command ${command}`);
-  const summary = route.human?.[0]?.summary ?? "";
-  const lines = [
-    `Usage: ${COMMAND_HELP_USAGE[command]}`,
+  const invoke = aidlcInvocation();
+  if (command === "config") {
+    return [
+      "Set up, refresh, or change AI-DLC project configuration",
+      "",
+      "USAGE",
+      `  ${invoke} config`,
+      `  ${invoke} config <section> [flags]`,
+      "",
+      "SECTIONS",
+      "  models      Which model and effort each agent uses (presets: thorough, balanced, minimal)",
+      "  runtime     Whether hooks can find bun, aidlc, and the selected harness",
+      "  providers   Provider, AWS region/profile, and manual provider actions",
+      "  trust       Host trust and command allowlist acknowledgement",
+      "  flags       Default scope, swarm, hook debug, sensor timeout, and bypasses",
+      "  project     Plugins, MCP servers, and shell completions",
+      "",
+      "COMMON FLAGS",
+      "  --pin <version>   Pin this project to an installed release",
+      "  --show            Show the selected section without changing it",
+      "  --dry-run         Print the transaction plan without writing",
+      "  --yes             Confirm explicit choices; it never chooses values",
+      "",
+      "EXAMPLES",
+      `  $ ${invoke} config`,
+      `  $ ${invoke} config models --show`,
+      `  $ ${invoke} config models --preset thorough --project --yes`,
+      "",
+      "Every interactive question has an equivalent flag for non-interactive use.",
+      `Full flag reference: ${invoke} config <section> --help`,
+      "",
+    ].join("\n");
+  }
+  const descriptions: Record<Exclude<PublicCommand, "config">, string> = {
+    doctor: "Check this machine and project and show a fix for every problem",
+    version: "Print binary and selected runtime versions",
+    update: "Install and switch to a newer aidlc release",
+    use: "Switch to an exact installed aidlc release",
+    uninstall: "Remove aidlc from this machine",
+  };
+  const examples: Partial<Record<Exclude<PublicCommand, "config">, string[]>> = {
+    doctor: [`  $ ${invoke} doctor`, `  $ ${invoke} doctor --verbose`],
+    update: [`  $ ${invoke} update --check`, `  $ ${invoke} update --dry-run`],
+    use: [`  $ ${invoke} use 2.6.2`],
+    uninstall: [`  $ ${invoke} uninstall`, `  $ ${invoke} uninstall --purge`],
+  };
+  return [
+    descriptions[command],
     "",
-    summary,
+    "USAGE",
+    `  ${invoke} ${COMMAND_HELP_USAGE[command].replace(/^aidlc\s+/, "")}`,
+    ...(examples[command]?.length
+      ? ["", "EXAMPLES", ...(examples[command] ?? [])]
+      : []),
     "",
-    "Forms:",
-    ...routeForms(route).map((form) => `  aidlc ${form}`),
+    `Run '${invoke} --help' for the public command list.`,
     "",
-    "Notes:",
-    ...COMMAND_HELP_NOTES[command].map((note) => `  ${note}`),
-    "",
-  ];
-  return lines.join("\n");
+  ].join("\n");
 }
 
 function commandHelpRequest(argv: readonly string[]): PublicCommand | null {
@@ -1177,6 +1205,44 @@ function topLevelError(command: string): Action {
     type: "error",
     code: 2,
     message: `aidlc: unknown command or noun '${command}'; try 'aidlc --help'\n`,
+  };
+}
+
+function editDistance(left: string, right: string): number {
+  const row = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i++) {
+    let diagonal = row[0];
+    row[0] = i;
+    for (let j = 1; j <= right.length; j++) {
+      const prior = row[j];
+      row[j] = Math.min(
+        row[j] + 1,
+        row[j - 1] + 1,
+        diagonal + (left[i - 1] === right[j - 1] ? 0 : 1),
+      );
+      diagonal = prior;
+    }
+  }
+  return row[right.length];
+}
+
+function publicCommandError(command: string): Action {
+  const nearest = [...PUBLIC_COMMANDS]
+    .map((candidate) => ({ candidate, distance: editDistance(command, candidate) }))
+    .sort((left, right) =>
+      left.distance - right.distance || left.candidate.localeCompare(right.candidate)
+    )[0];
+  const tip = nearest && nearest.distance <= 2
+    ? `\n  tip: did you mean '${nearest.candidate}'?\n`
+    : "";
+  return {
+    type: "error",
+    code: 2,
+    message: `aidlc: unknown command or noun '${command}'; try 'aidlc --help'\n`,
+    humanMessage:
+      `error: unknown command '${command}'\n${tip}\n` +
+      "usage: aidlc <command> [flags]\n" +
+      "For the full list, run 'aidlc --help'.\n",
   };
 }
 
@@ -1486,7 +1552,7 @@ function resolveActionWithoutGlobalFlags(argv: string[]): Action {
   const top = resolveTop(argv);
   if (top) return top;
 
-  return topLevelError(argv[0]);
+  return publicCommandError(argv[0]);
 }
 
 export function resolveAction(argv: string[]): Action {
@@ -1891,7 +1957,7 @@ async function execute(action: Action): Promise<number> {
     return await withProjectDir(action.projectDir, () => runSensorScriptFile(action));
   }
   if (action.type === "stub" || action.type === "error") {
-    text(2, action.message);
+    text(2, action.type === "error" ? action.humanMessage ?? action.message : action.message);
     return action.code;
   }
   return 1;
@@ -2083,7 +2149,7 @@ function renderDispatcherFailure(
     text(1, `${remediation ?? cleanMessage}\n`);
   } else {
     text(2, `aidlc: ${cleanMessage}\n`);
-    if (remediation) text(2, `Run: ${remediation}\n`);
+    if (remediation) text(2, `fix: ${remediation}\n`);
   }
   return code;
 }
