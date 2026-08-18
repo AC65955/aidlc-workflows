@@ -468,7 +468,7 @@ describe("t27 aidlc-utility doctor", () => {
     expect(existsSync(auditPath(p))).toBe(false); // precondition: no audit yet
     const r = util(["doctor"], p);
     // The health report still printed (the diagnostic is always emitted).
-    expect(r.stdout).toContain("AI-DLC Health Check");
+    expect(r.stdout).toContain("AI-DLC doctor");
     // The cold-safe invariant: doctor created no audit.md as a side effect.
     expect(existsSync(auditPath(p))).toBe(false);
   });
@@ -493,7 +493,7 @@ describe("t27 aidlc-utility doctor", () => {
       "aidlc-run-sensors", // previously missing
       "aidlc-continue-workflow", // previously missing (the flow-altering Stop hook)
     ]) {
-      // A wired-and-present hook renders a passing "✓  <hook>.ts present" row.
+      // A wired-and-present hook renders an "ok <hook>.ts present" row.
       expect(r.stdout).toContain(`${hook}.ts present`);
     }
   });
@@ -502,7 +502,7 @@ describe("t27 aidlc-utility doctor", () => {
   // silently drop it. The expected roster comes from settings.json (the
   // contract) while presence is probed against .claude/hooks/, so the two
   // genuinely diverge: deleting aidlc-continue-workflow.ts from a project whose settings.json
-  // still wires it produces a loud "✗  aidlc-continue-workflow.ts present" failure row. (The
+  // still wires it produces a loud "fail aidlc-continue-workflow.ts present" row. (The
   // pre-redesign derive-from-the-hooks-dir approach could not catch this — a
   // missing hook simply wasn't enumerated, so it was never reported.)
   test("12c: doctor flags a settings.json-wired hook that is missing on disk", () => {
@@ -510,12 +510,12 @@ describe("t27 aidlc-utility doctor", () => {
       rmSync(join(claudeDir, "hooks", "aidlc-continue-workflow.ts"));
     });
     const r = util(["doctor"], p);
-    // The missing hook is named with the ✗ failure marker, not silently absent.
-    expect(r.stdout).toContain("✗  aidlc-continue-workflow.ts present");
+    // The missing hook is named with the fail verdict, not silently absent.
+    expect(r.stdout).toContain("fail  aidlc-continue-workflow.ts present");
     // And doctor exits non-zero (a failed check), so CI/scripts see the breakage.
     expect(r.status).not.toBe(0);
     // Sibling hooks that ARE present still pass — only the deleted one fails.
-    expect(r.stdout).toContain("✓  aidlc-write-audit-log.ts present");
+    expect(r.stdout).toContain("ok    aidlc-write-audit-log.ts present");
   });
 
   // FINDING #1 corollary: when settings.json is absent the hook CONTRACT cannot

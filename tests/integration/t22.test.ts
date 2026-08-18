@@ -21,7 +21,7 @@
 //
 // The known-answer label strings are READ from the shipped doctor handler
 // (dist/claude/.claude/tools/aidlc-utility.ts handleDoctor), NOT guessed:
-//   - header literal:     "AI-DLC Health Check"               (utility.ts:1355)
+//   - header literal:     "AI-DLC doctor"                     (doctor renderer)
 //   - runtime label:      "Runtime hook PATH: bun"                  (shared diagnostics)
 //   - hook check label:   "<hook>.ts present"                 (utility.ts:356)
 //   - settings label:     "settings.json present"            (utility.ts:365)
@@ -63,7 +63,7 @@ const TEST_TIMEOUT_MS = (Number.isFinite(TIMEOUT_S) ? TIMEOUT_S : 600) * 1000;
 const DRIVE_TIMEOUT_MS = Math.max(120_000, TEST_TIMEOUT_MS - 15_000);
 
 // Known-answer doctor strings, read from the shipped handler (see header).
-const DOCTOR_HEADER = "AI-DLC Health Check";
+const DOCTOR_HEADER = "AI-DLC doctor";
 const DOCTOR_RUNTIME_LABEL = "Runtime hook PATH: bun";
 const DOCTOR_HOOK_LABEL = "aidlc-write-audit-log.ts present";
 // handleDoctor emits a separate `${h}.ts present` line per hook (utility.ts:356);
@@ -133,7 +133,7 @@ describe("t22 /aidlc --doctor (SDK port)", () => {
         // settings check (was .sh tests 3,6):
         assertToolResultContains(r, "Bash", DOCTOR_SETTINGS_LABEL);
 
-        // The footer shape "N passed, W warnings, M failed" is verbatim tool stdout
+        // The footer shape "N problems, M warnings." is verbatim tool stdout
         // (utility.ts:1371) — a structure the LLM prose does not reliably
         // reproduce. Locate it in the SAME Bash tool_result that carried the
         // header (so an unrelated Bash call can't satisfy it).
@@ -142,7 +142,7 @@ describe("t22 /aidlc --doctor (SDK port)", () => {
         );
         expect(doctorCall).toBeDefined();
         expect(doctorCall?.isError).toBe(false);
-        expect(doctorCall!.resultText).toMatch(/\d+ passed, \d+ warnings, \d+ failed/);
+        expect(doctorCall!.resultText).toMatch(/\d+ problems?, \d+ warnings?\./);
 
         // .sh test 8: audit file grew. Re-expressed on auditEvents: the doctor
         // appends exactly HEALTH_CHECKED, so the post-run log must contain it

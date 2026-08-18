@@ -212,7 +212,7 @@ describe("t238 build-binaries release builder", () => {
 
     const delegateDoctorData = gate(native, "delegate-doctor-data");
     expect(delegateDoctorData.ok).toBe(true);
-    expect(delegateDoctorData.stdout).toContain("AI-DLC Health Check");
+    expect(delegateDoctorData.stdout).toContain("AI-DLC doctor");
     expect(delegateDoctorData.stdout).toMatch(/Schema validation: \d+\/\d+ stages validated/);
     expect(delegateDoctorData.stdout).not.toContain("Schema validation: 0/0");
     expect(`${delegateDoctorData.stdout ?? ""}${delegateDoctorData.stderr ?? ""}`).not.toMatch(
@@ -259,7 +259,7 @@ describe("t238 build-binaries release builder", () => {
       timeout: 30_000,
     });
     expect(doctor.status === 0 || doctor.status === 1).toBe(true);
-    expect(doctor.stdout ?? "").toContain("AI-DLC Health Check");
+    expect(doctor.stdout ?? "").toContain("AI-DLC doctor");
     expect(`${doctor.stdout ?? ""}${doctor.stderr ?? ""}`).not.toMatch(
       /Cannot find module|\/\$bunfs\/|ENOENT/,
     );

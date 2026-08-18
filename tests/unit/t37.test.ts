@@ -156,9 +156,17 @@ interface DoctorResult {
  * Mirrors the .sh's `[ENV=...] bun "$UTIL" doctor --project-dir "$PROJ" 2>&1 || true`.
  */
 function doctor(p: string, env: Record<string, string> = {}): DoctorResult {
-  const res = spawnSync(BUN, [UTIL, "doctor", "--project-dir", p], {
+  const res = spawnSync(BUN, [UTIL, "doctor", "--verbose", "--project-dir", p], {
     encoding: "utf-8",
     env: { ...process.env, ...env },
+  });
+  return { status: res.status ?? -1, out: `${res.stdout ?? ""}${res.stderr ?? ""}` };
+}
+
+function doctorDefault(p: string): DoctorResult {
+  const res = spawnSync(BUN, [UTIL, "doctor", "--project-dir", p], {
+    encoding: "utf-8",
+    env: { ...process.env },
   });
   return { status: res.status ?? -1, out: `${res.stdout ?? ""}${res.stderr ?? ""}` };
 }
@@ -302,7 +310,7 @@ describe("t37 aidlc-utility doctor — graph-level checks", () => {
     const missingGraph = join(p, "missing-stage-graph.json");
     const r = doctor(p, { AIDLC_STAGE_GRAPH: missingGraph });
     expect(r.status).toBe(1);
-    expect(r.out).toContain("AI-DLC Health Check");
+    expect(r.out).toContain("AI-DLC doctor");
     expect(r.out).toContain("Paired sensor coverage: check failed");
     expect(r.out).toContain(`Stage graph not readable at ${missingGraph}`);
     expect(r.out).not.toContain('{"error":');
@@ -477,6 +485,25 @@ describe("t37 aidlc-utility doctor — graph-level checks", () => {
     const p = track(setupIntegrationProject());
     const r = doctor(p);
     expect(r.status).toBe(0);
+  });
+
+  test("17b: warnings-only doctor report exits 0", () => {
+    const p = track(setupIntegrationProject());
+    recordHookDrop(p, "write-audit-log", "audit emission failed: EACCES");
+    const r = doctor(p);
+    expect(r.status).toBe(0);
+    expect(r.out).toContain("Warnings are advisory - if everything works, ignore them.");
+  });
+
+  test("17c: default doctor collapses clean framework rows and verbose expands them", () => {
+    const p = track(setupIntegrationProject());
+    const concise = doctorDefault(p);
+    expect(concise.status).toBe(0);
+    expect(concise.out).toContain("Framework integrity");
+    expect(concise.out).toMatch(/ok\s+all checks passed \(\d+ framework checks\)/);
+    expect(concise.out).not.toContain("Schema validation:");
+    const expanded = doctor(p);
+    expect(expanded.out).toContain("Schema validation:");
   });
 
   // Hook-drop probe (issue: recordHookDrop wrote .drops telemetry for doctor,

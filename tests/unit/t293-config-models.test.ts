@@ -521,10 +521,16 @@ describe("t293 config models CLI", () => {
       "--show",
     ], project, runtimeEnv());
     expect(shown.status).toBe(0);
+    expect(shown.stdout).toContain("Preset: none (shipped defaults)");
     expect(shown.stdout).toContain(
-      "product-lead [Reviewing] sonnet (shipped default)/xhigh (project)",
+      "All 14 agents inherit your session model and effort, except:",
     );
-    expect(shown.stdout).toContain("provenance: group-dial");
+    expect(shown.stdout).toContain("Reviewing (2 agents): sonnet / xhigh");
+    expect(shown.stdout).toContain(
+      "Recorded override: group-dial; model shipped default, effort project.",
+    );
+    expect(shown.stdout).toContain("Recorded in:");
+    expect(shown.stdout).toContain("Full per-agent list:");
 
     const shownJson = run([
       "config",

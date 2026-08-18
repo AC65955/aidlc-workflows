@@ -293,7 +293,7 @@ describe("t240 dist/opencode packaging parity + shell shape", () => {
         },
       );
       expect(r.stdout).toContain(
-        "✓  opencode.json or opencode.jsonc present (permissions + method instructions glob)",
+        "ok    opencode.json or opencode.jsonc present (permissions + method instructions glob)",
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

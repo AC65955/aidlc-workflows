@@ -50,7 +50,7 @@ const SKIP_REASON = skipReason();
 // SDK calibration — real, not guessed):
 //   aidlc-utility.ts handleDoctor(): header + bun label; the Kiro tree adds
 //   the adapter + agent-config labels (harness-aware doctor, parity closeout).
-const DOCTOR_HEADER = "AI-DLC Health Check";
+const DOCTOR_HEADER = "AI-DLC doctor";
 const DOCTOR_RUNTIME_LABEL = "Self-contained binary runtime (bun is not required)";
 const DOCTOR_ADAPTER_LABEL = "aidlc-kiro-adapter.ts present";
 const DOCTOR_AGENT_LABEL = "agents/aidlc.json present";

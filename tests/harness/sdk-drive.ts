@@ -428,7 +428,7 @@ function writeSdkTrace(
  * @example
  *   const r = await driveAidlc("/aidlc --doctor", { projectDir: proj });
  *   assertResultOk(r);
- *   assertToolResultContains(r, "Bash", "AI-DLC Health Check");
+ *   assertToolResultContains(r, "Bash", "AI-DLC doctor");
  *
  * @example  scripted gates
  *   const r = await driveAidlc("/aidlc workshop Build a todo app", {

@@ -40,7 +40,7 @@
 //       "unpaired: .claude/rules/aidlc-team.md → aidlc-ghost (no stage binds
 //       it)"                                    -> test 2 (same substring).
 //   - .sh case 3 COV_LINE grep "^✓" on the coverage line -> test 3: the
-//       coverage line is prefixed "✓  " (advisory pass), asserted by isolating
+//       coverage line is prefixed "ok" (advisory pass), asserted by isolating
 //       the "Paired sensor coverage:" line and checking its ✓ prefix.
 //   - .sh case 4 audit.md has GUARDRAIL_LOADED AND "## Guardrail Loaded"
 //       headings                                -> test 4: BOTH preserved;
@@ -134,7 +134,7 @@ function runDoctor(rulesDir: string): DoctorResult {
   const shard = auditFilePath(proj);
   mkdirSync(dirname(shard), { recursive: true });
   writeFileSync(shard, "# AI-DLC Audit Log\n", "utf-8");
-  const res = spawnSync(BUN, [UTIL, "doctor", "--project-dir", proj], {
+  const res = spawnSync(BUN, [UTIL, "doctor", "--verbose", "--project-dir", proj], {
     encoding: "utf-8",
     env: {
       ...process.env,
@@ -298,8 +298,8 @@ describe("t105 doctor paired-coverage + GUARDRAIL_LOADED (migrated from t105-doc
     const r = ensureCov();
     const line = coverageLine(r.out);
     expect(line).not.toBe("");
-    // doctor renders a passing row as "✓  <label>" (utility.ts:1361).
-    expect(line.startsWith("✓")).toBe(true);
+    // doctor renders a passing row with the fixed-column `ok` verdict.
+    expect(line.startsWith("  ok")).toBe(true);
   });
 
   // --- Case 4: GUARDRAIL_LOADED row written to audit.md ---

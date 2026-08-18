@@ -372,7 +372,8 @@ Run the health check to confirm everything is in place:
 /aidlc --doctor
 ```
 
-`--doctor` exits 0 when every check passes and 1 when any check fails; the full report writes to stdout in both cases.
+`--doctor` exits 0 for a clean or warnings-only report and 1 when any check
+fails; the full report writes to stdout in both cases.
 
 ### What `--doctor` checks
 
@@ -395,25 +396,21 @@ Run the health check to confirm everything is in place:
 ### Example copy-install output
 
 ```
-✓ bun installed (required for CLI tools and hooks)
-✓ aidlc-write-audit-log.ts present
-✓ aidlc-sync-workflow-state.ts present
-✓ aidlc-validate-state.ts present
-✓ aidlc-log-subagent.ts present
-✓ aidlc-session-start.ts present
-✓ aidlc-session-end.ts present
-✓ aidlc-statusline.ts present
-✓ settings.json present
-✓ AWS_AIDLC_DEFAULT_SCOPE (unset — no project default)
-✓ workspace shell ready (.claude/ + aidlc/spaces/default/memory/)
-✓ Hook heartbeats: not yet fired (first workflow stage will populate)
-✓ State matches last audit event (no drift)
-✓ Cycle detection: 0 cycles
-✓ Orphan stage files: 33 graph entries all have files
-✓ Scope validation: 9 scopes valid (29 advisories)
-✓ Schema validation: 33/33 stages valid
-✓ Graph references: 122 artifacts + edges resolved
-✓ Keyword overlap: no conflicts
+AI-DLC doctor
+
+Machine
+  ok    bun installed (required for CLI tools and hooks)
+
+Project (.claude, Claude Code)
+  ok    settings.json present
+  warn  Hook heartbeats: not yet fired
+        fix: Run the first workflow stage to populate hook heartbeats
+
+Framework integrity
+  ok    all checks passed (12 framework checks)
+
+0 problems, 1 warning.
+Warnings are advisory - if everything works, ignore them.
 ```
 
 ### Fixing failures

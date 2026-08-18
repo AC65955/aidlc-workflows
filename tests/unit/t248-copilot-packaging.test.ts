@@ -213,11 +213,11 @@ describe("t248 dist/copilot packaging parity + shell shape", () => {
       );
       const output = `${result.stdout}${result.stderr}`;
       expect(result.status).not.toBe(0);
-      expect(output).toContain("✗  aidlc-state-transition-guard.ts present");
-      expect(output).toContain("✗  aidlc-deliver-stage-rules.ts present");
-      expect(output).toContain("✗  aidlc-plan-approval-guard.ts present");
-      expect(output).toContain("✗  aidlc-review-freeze.ts present");
-      expect(output).toContain("✗  AGENTS.md present (onboarding + method imports)");
+      expect(output).toContain("fail  aidlc-state-transition-guard.ts present");
+      expect(output).toContain("fail  aidlc-deliver-stage-rules.ts present");
+      expect(output).toContain("fail  aidlc-plan-approval-guard.ts present");
+      expect(output).toContain("fail  aidlc-review-freeze.ts present");
+      expect(output).toContain("fail  AGENTS.md present (onboarding + method imports)");
     } finally {
       rmSync(project, { recursive: true, force: true });
     }
@@ -264,14 +264,14 @@ describe("t248 dist/copilot packaging parity + shell shape", () => {
       const valid = runDoctor();
       expect(valid.status).toBe(0);
       expect(`${valid.stdout}${valid.stderr}`).toContain(
-        "✓  project folder in ~/.copilot/config.json trustedFolders",
+        "ok    project folder in ~/.copilot/config.json trustedFolders",
       );
 
       writeFileSync(configPath, '{ "trustedFolders": [\n');
       const malformed = runDoctor();
       expect(malformed.status).not.toBe(0);
       expect(`${malformed.stdout}${malformed.stderr}`).toContain(
-        "✗  could not parse ~/.copilot/config.json",
+        "fail  could not parse ~/.copilot/config.json",
       );
     } finally {
       rmSync(project, { recursive: true, force: true });

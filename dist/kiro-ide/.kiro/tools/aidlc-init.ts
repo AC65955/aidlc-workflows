@@ -555,18 +555,59 @@ function showModels(
     emitResult(success(`model policy for ${harness}`, data), options);
     return;
   }
-  let output = `Model policy for ${harness}\n`;
+  let output = `Model policy for ${harness}\n\n`;
+  output += `Preset: ${policy?.preset ?? "none (shipped defaults)"}\n\n`;
+  output += `All ${data.effective.length} agents inherit your session model and effort, except:\n`;
+  const grouped = new Map<string, typeof data.effective>();
   for (const item of data.effective) {
-    output += `  ${item.agent} [${MODEL_GROUPS[item.group].label}] ${
-      item.model ?? "inherit"
-    } (${item.modelSource})/${item.effort ?? "inherit"} (${item.effortSource})\n`;
-    output += `    provenance: ${item.layer}`;
-    if (item.unexpressed.length > 0) {
-      output += `; not expressible: ${item.unexpressed.join(", ")}`;
+    const differs = (item.model !== undefined && item.model !== "inherit") ||
+      item.effort !== undefined ||
+      item.requestedModel !== undefined ||
+      item.requestedEffort !== undefined;
+    if (!differs) continue;
+    const key = [
+      item.group,
+      item.model ?? "inherit",
+      item.effort ?? "inherit",
+      item.layer,
+      item.modelSource,
+      item.effortSource,
+    ].join("|");
+    grouped.set(key, [...(grouped.get(key) ?? []), item]);
+  }
+  if (grouped.size === 0) output += "  none\n";
+  for (const items of grouped.values()) {
+    const item = items[0];
+    const label = item.layer === "agent-exception" && items.length === 1
+      ? item.agent
+      : `${MODEL_GROUPS[item.group].label} (${items.length} agents)`;
+    output += `  ${label}: ${item.model ?? "inherit"} / ${item.effort ?? "inherit"}\n`;
+    if (item.group === "reviewing") {
+      output +=
+        "    Review-only agents use the measured medium baseline. At xhigh, measured review wall-clock is roughly 9x medium (#612 data).\n";
     }
-    output += "\n";
+    if (item.layer === "agent-exception" || item.layer === "group-dial") {
+      output += `    Recorded override: ${item.layer}; model ${item.modelSource}, effort ${item.effortSource}.\n`;
+    }
+    if (item.unexpressed.length > 0) {
+      output += `    Not expressible on ${harness}: ${item.unexpressed.join(", ")}.\n`;
+    }
   }
   for (const note of data.notes) output += `  Note: ${note}\n`;
+  const recorded = ([
+    ["global", resolved.files.machine],
+    ["project", resolved.files.project],
+    ["local", resolved.files.local],
+  ] as const).filter(([target, file]) =>
+    file.present &&
+    readSettingsTarget(projectDir, target)?.models !== undefined
+  ).map(([, file]) => file.path);
+  output += `\nRecorded in: ${
+    recorded.length > 0
+      ? recorded.join(", ")
+      : "nothing yet - run 'aidlc config models --preset balanced --project --yes'"
+  }\n`;
+  output += "Full per-agent list: aidlc config models --show --json\n";
   process.stdout.write(output);
   process.exitCode = EXIT.ok;
 }

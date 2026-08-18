@@ -1572,10 +1572,13 @@ function dispatcherParityGate(artifact: string): GateResult {
 }
 
 function delegateDoctorDataGate(artifact: string): GateResult {
-  const result = run(artifact, ["doctor"], { cwd: standaloneGateCwd(), timeoutMs: 30_000 });
+  const result = run(artifact, ["doctor", "--verbose"], {
+    cwd: standaloneGateCwd(),
+    timeoutMs: 30_000,
+  });
   const output = `${result.stdout}\n${result.stderr}`;
   const crashSignature = output.match(/Cannot find module|\/\$bunfs\/|ENOENT/)?.[0] ?? "";
-  const reportEmitted = result.stdout.includes("AI-DLC Health Check");
+  const reportEmitted = result.stdout.includes("AI-DLC doctor");
   const schemaCount = /Schema validation: (\d+)\/(\d+) stages validated/.exec(result.stdout);
   const meaningfulSchemaCount =
     schemaCount !== null &&

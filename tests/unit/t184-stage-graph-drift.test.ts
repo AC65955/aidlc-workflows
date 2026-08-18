@@ -85,7 +85,7 @@ interface SpawnResult {
 /** Spawn the sandbox's own doctor (resolves stages off its module dir). */
 function doctor(proj: string): SpawnResult {
   const util = join(proj, ".claude", "tools", "aidlc-utility.ts");
-  const r = spawnSync(BUN, [util, "doctor", "--project-dir", proj], {
+  const r = spawnSync(BUN, [util, "doctor", "--verbose", "--project-dir", proj], {
     encoding: "utf-8",
   });
   return { status: r.status ?? -1, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };

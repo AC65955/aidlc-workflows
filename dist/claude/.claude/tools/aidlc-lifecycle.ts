@@ -1640,11 +1640,70 @@ function installProfileCommand(argv: string[]): CommandResult {
   return success(`updated ${profile} with an owned AI-DLC PATH block`, { profile, bin });
 }
 
+function humanLifecycleNarration(
+  command: string | undefined,
+  argv: readonly string[],
+  before: string | null,
+  result: CommandResult,
+): string | null {
+  if (!result.ok) return null;
+  if (command === "update" && !argv.includes("--check")) {
+    const data = result.data as {
+      version?: string;
+      pruned?: string[];
+    } | undefined;
+    const target = data?.version;
+    if (!target) return null;
+    const pruned = data?.pruned ?? [];
+    const pruneLine = pruned.length > 0
+      ? `\nPruned unprotected releases: ${pruned.join(", ")}.`
+      : "";
+    if (argv.includes("--dry-run")) {
+      return `Would update aidlc from ${before ?? "not installed"} to ${target}.`;
+    }
+    if (before === target) {
+      return `You're on the latest version of aidlc (${target}).${pruneLine}`;
+    }
+    return [
+      `Checking for releases ... ${before ?? "not installed"} -> ${target}`,
+      `Downloading aidlc ${target} ... done (verified)`,
+      `Staging and switching ... done (${
+        before ? `${before} retained` : "no prior version retained"
+      })`,
+      ...(pruned.length > 0 ? [`Pruned unprotected releases: ${pruned.join(", ")}.`] : []),
+      "",
+      `Updated aidlc from ${before ?? "not installed"} to ${target}.`,
+      "Project files were not changed. Run 'aidlc config' between workflows to refresh them.",
+    ].join("\n");
+  }
+  if (command === "use") {
+    const target = (result.data as { version?: string } | undefined)?.version ?? argv[1];
+    if (!target) return null;
+    return before === target
+      ? `Already using aidlc ${target}.`
+      : `Now using aidlc ${target} (was ${
+        before ?? "not installed"
+      }; retained locally, no project changes).`;
+  }
+  if (command === "uninstall") {
+    const data = result.data as {
+      purge?: boolean;
+      deferred?: boolean;
+    } | undefined;
+    if (data?.deferred) return null;
+    return data?.purge
+      ? "Removed aidlc, all retained releases, machine settings, update cache, pins, and harness default. Project files were kept."
+      : "Removed aidlc and all retained releases. Machine settings, update cache, pins, harness default, and project files were kept.";
+  }
+  return null;
+}
+
 export async function main(input: string[]): Promise<void> {
   const argv = input;
   const options = globalOptions(argv);
   try {
     const command = argv[0];
+    const before = activeVersion();
     const result = command === "versions"
       ? await versionsCommand(argv)
       : command === "update"
@@ -1670,7 +1729,15 @@ export async function main(input: string[]): Promise<void> {
           })).version}`,
         )
       : usage("unknown lifecycle command");
-    emitResult(result, options);
+    const narration = options.mode === "human"
+      ? humanLifecycleNarration(command, argv, before, result)
+      : null;
+    if (narration !== null) {
+      process.stdout.write(`${narration}\n`);
+      process.exitCode = result.code;
+    } else {
+      emitResult(result, options);
+    }
   } catch (error) {
     emitResult(lifecycleFailureResult(error, argv), options);
   }

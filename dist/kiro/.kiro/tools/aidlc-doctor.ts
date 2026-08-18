@@ -92,7 +92,13 @@ function updateCheck(state: UpdateState): DoctorCheck {
       ? undefined
       : "warn",
     label: `Update: ${state.message}`,
-    fix: state.state === "behind" ? "run `aidlc update`" : undefined,
+    fix: state.state === "behind"
+      ? "run `aidlc update`"
+      : state.state === "invalid-config"
+      ? "run `aidlc config list --global` and correct the invalid update setting"
+      : state.state === "current"
+      ? undefined
+      : "run `aidlc update --check`",
   };
 }
 
@@ -174,43 +180,74 @@ export function modelsPolicyCheck(projectDir: string, verbose: boolean): DoctorC
   };
 }
 
-function humanReport(report: DoctorReport, analysis: DoctorAnalysis): string {
-  let output = "AI-DLC Health Check\n";
-  output += `${"\u2500".repeat(37)}\n`;
-  for (const check of report.checks) {
-    if (check.severity === "warn") {
-      output += `!  ${check.label}`;
-    } else if (check.pass) {
-      output += `\u2713  ${check.label}`;
-    } else {
-      output += `\u2717  ${check.label}`;
-    }
-    if (!check.pass && check.fix) output += ` - ${check.fix}`;
-    output += "\n";
+function humanReport(
+  report: DoctorReport,
+  analysis: DoctorAnalysis,
+  projectDir: string,
+  verbose: boolean,
+): string {
+  const harness = discoverProjectHarnesses(projectDir)[0];
+  const productNames: Record<string, string> = {
+    claude: "Claude Code",
+    codex: "Codex CLI",
+    copilot: "GitHub Copilot",
+    cursor: "Cursor",
+    kiro: "Kiro CLI",
+    "kiro-ide": "Kiro IDE",
+    opencode: "opencode",
+  };
+  const frameworkPattern =
+    /^(?:Agent filename|Scope filename|Cycle detection|Orphan stage|Uncompiled stage|Enabled stage compile coverage|Scope validation|Schema validation|Graph references|Keyword overlap|Rule drift|Paired sensor coverage|Stage graph|Scope grid|Sensor |Required sections|Upstream coverage|Traceability|Linter|Type check)/i;
+  const machinePattern =
+    /^(?:Update:|Windows uninstall|Runtime hook PATH|Harness CLI|Installed runtime|Command pointer|Rollback target|Project pin registry|Transaction staging|Transaction recovery|Settings global)/i;
+  const machine = report.checks.filter((check) => machinePattern.test(check.label));
+  const framework = report.checks.filter((check) => frameworkPattern.test(check.label));
+  const project = report.checks.filter((check) =>
+    !machine.includes(check) && !framework.includes(check)
+  );
+  const status = (check: DoctorCheck): "ok" | "warn" | "fail" =>
+    check.severity === "warn" ? "warn" : check.pass ? "ok" : "fail";
+  const fallbackFix =
+    "run `aidlc doctor --verbose`, correct the named condition, then rerun `aidlc doctor`";
+  const renderCheck = (check: DoctorCheck): string => {
+    const verdict = status(check);
+    let row = `  ${verdict.padEnd(5)} ${check.label}\n`;
+    if (verdict !== "ok") row += `        fix: ${check.fix ?? fallbackFix}\n`;
+    return row;
+  };
+  const findings = analysis.findings.filter((finding) => finding.severity !== "info");
+  let output = "AI-DLC doctor\n\n";
+  output += "Machine\n";
+  for (const check of machine) output += renderCheck(check);
+  output += `\nProject${
+    harness
+      ? ` (${harness.harnessDir}, ${productNames[harness.distribution] ?? harness.distribution})`
+      : ""
+  }\n`;
+  for (const check of project) output += renderCheck(check);
+  for (const finding of findings) {
+    output += `  warn  [${finding.id}] ${finding.summary}\n`;
+    output += `        fix: ${finding.remedy ?? fallbackFix}\n`;
   }
-  // Structured diagnosis findings (workflow timeline analysis) are ADVISORY and
-  // never change doctor's exit code: they render for visibility but do not count
-  // toward `failed`. Only the environment/config checks drive the exit status,
-  // so a plain `/aidlc --doctor` keeps its pre-existing contract \u2014 a
-  // workflow-level diagnosis (which can be a soft, workflow-in-progress signal)
-  // must not flip the exit code that CI and scripts gate on. Info is omitted
-  // from the live view to keep it terse; the export carries the full set.
-  const diagErrors = analysis.findings.filter((f) => f.severity === "error");
-  const diagWarnings = analysis.findings.filter((f) => f.severity === "warning");
-  if (diagErrors.length > 0 || diagWarnings.length > 0) {
-    output += `${"\u2500".repeat(37)}\n`;
-    output += "Workflow diagnosis (advisory):\n";
-    for (const f of diagErrors) {
-      output += `\u2717  [${f.id}] ${f.summary}`;
-      if (f.remedy) output += ` (${f.remedy})`;
-      output += "\n";
-    }
-    for (const f of diagWarnings) {
-      output += `!  [${f.id}] ${f.summary}\n`;
-    }
+  output += "\nFramework integrity\n";
+  const frameworkClean = framework.every((check) =>
+    check.pass && check.severity !== "warn"
+  );
+  if (!verbose && frameworkClean) {
+    output += `  ok    all checks passed (${framework.length} framework checks)\n`;
+  } else {
+    for (const check of framework) output += renderCheck(check);
   }
-  output += `${"\u2500".repeat(37)}\n`;
-  output += `${report.passed} passed, ${report.warnings} warnings, ${report.failed} failed\n`;
+  const visibleWarnings = report.warnings + findings.length;
+  output += `\n${report.failed} problem${report.failed === 1 ? "" : "s"}, ${
+    visibleWarnings
+  } warning${visibleWarnings === 1 ? "" : "s"}.\n`;
+  if (visibleWarnings > 0) {
+    output += "Warnings are advisory - if everything works, ignore them.\n";
+  }
+  if (report.failed === 0 && visibleWarnings === 0) {
+    output += "Your install is ready.\n";
+  }
   return output;
 }
 
@@ -316,7 +353,9 @@ export async function main(argv: string[]): Promise<void> {
       `${report.passed} passed, ${report.warnings} warnings, ${report.failed} failed\n`,
     );
   } else {
-    process.stdout.write(humanReport(report, analysis));
+    process.stdout.write(
+      humanReport(report, analysis, projectDir, flags.verbose === "true"),
+    );
   }
   if ("export" in flags) writeExport(projectDir, flags, report, analysis);
   process.exitCode = code;

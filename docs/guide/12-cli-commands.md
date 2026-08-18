@@ -281,7 +281,13 @@ running a workflow stage.
 
 ### `/aidlc --doctor` — Health check
 
-Validate that all of this implementation's prerequisites, configuration, and stage-graph integrity are in place. Exits 0 on full pass, 1 on any failure; the full report writes to stdout in both cases so the orchestrator surfaces it either way. `--doctor` is **read-only** — on a fresh shell with no intent yet (no `audit/` shards) it creates no files, so it is safe to run before the first intent is born; once an intent exists it records a `HEALTH_CHECKED` audit row.
+Validate that all of this implementation's prerequisites, configuration, and
+stage-graph integrity are in place. Clean and warnings-only reports exit 0; a
+failed check exits 1. The full report writes to stdout in all cases so the
+orchestrator surfaces it either way. `--doctor` is **read-only** - on a fresh
+shell with no intent yet (no `audit/` shards) it creates no files, so it is safe
+to run before the first intent is born; once an intent exists it records a
+`HEALTH_CHECKED` audit row.
 
 When a workflow has issues, `--doctor` also prints a **Workflow diagnosis** section listing the structured findings (e.g. `gate-unresolved`, `runtime-graph-stale`) for unresolved gates, a stale or missing runtime graph, cold hooks, and similar "it will not advance" causes. The live report and `--export` share one analysis, so the findings are identical either way.
 
@@ -324,32 +330,25 @@ When a workflow has issues, `--doctor` also prints a **Workflow diagnosis** sect
 **Example output:**
 
 ```
-✓ bun installed (required for CLI tools and hooks)
-✓ aidlc-write-audit-log.ts present
-✓ aidlc-sync-workflow-state.ts present
-✓ aidlc-validate-state.ts present
-✓ aidlc-log-subagent.ts present
-✓ aidlc-session-start.ts present
-✓ aidlc-session-end.ts present
-✓ aidlc-statusline.ts present
-✓ settings.json present
-✓ AWS_AIDLC_DEFAULT_SCOPE (unset — no project default)
-✓ workspace shell ready (.claude/ + aidlc/spaces/default/memory/)
-✓ Submodules: no .gitmodules at workspace root
-✓ Hook heartbeats: not yet fired (first workflow stage will populate)
-✓ Hook drops: none recorded
-✓ State matches last audit event (no drift)
-✓ Cycle detection: 0 cycles
-✓ Orphan stage files: 33 graph entries all have files
-✓ Uncompiled stage files: 0 stage files missing from the compiled graph
-✓ Enabled plugins: all enabled (no selection); enabled stage counts: aidlc=33
-✓ Scope validation: 9 scopes valid (29 advisories)
-✓ Schema validation: 33/33 stages valid
-✓ Graph references: 122 artifacts + edges resolved
-✓ Keyword overlap: no conflicts
-✓ Rule drift: no team/project rule overlaps org policy
-✓ Paired sensor coverage: no sensor-bound rules (0 feedforward-only)
+AI-DLC doctor
+
+Machine
+  ok    bun installed (required for CLI tools and hooks)
+
+Project (.claude, Claude Code)
+  ok    settings.json present
+  warn  Hook heartbeats: not yet fired
+        fix: Run the first workflow stage to populate hook heartbeats
+
+Framework integrity
+  ok    all checks passed (12 framework checks)
+
+0 problems, 1 warning.
+Warnings are advisory - if everything works, ignore them.
 ```
+
+Use `--verbose` to expand every graph, schema, stage, scope, and sensor row.
+Every warning or failure carries a following `fix:` action.
 
 ---
 

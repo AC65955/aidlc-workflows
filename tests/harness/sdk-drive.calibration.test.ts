@@ -55,21 +55,20 @@ const DRIVE_TIMEOUT_MS = Math.max(60_000, TEST_TIMEOUT_MS - 15_000);
 // CALIBRATION 2 known-answer strings — read from the SHIPPED doctor handler so
 // they are REAL, not guessed. Source: dist/claude/.claude/tools/
 // aidlc-utility.ts handleDoctor():
-//   - header literal:           "AI-DLC Health Check\n"            (utility.ts:1355)
+//   - header literal:           "AI-DLC doctor\n"                  (doctor renderer)
 //   - separator rule:           "─".repeat(37)                (utility.ts:1356)
-//   - runtime label prefix:     "Runtime hook PATH: bun ->"         (shared diagnostics)
+//   - runtime label prefix:     "Runtime hook PATH: bun"            (shared diagnostics)
 //   - hook label shape:         "<hook>.ts present"                (utility.ts:356, hooks :343-351)
 //   - settings label:           "settings.json present"           (utility.ts:365)
-//   - aidlc-docs label:         "aidlc-docs/ directory exists"     (utility.ts:396)
+//   - workspace label:          "workspace shell ready"            (shared doctor)
 // The spike's aidlc-sdk-toolout-probe.ts proved these exact strings appear in
 // the tool_result (and unreliably in prose) — we re-prove it through the driver.
 // ---------------------------------------------------------------------------
-const DOCTOR_HEADER = "AI-DLC Health Check";
-const DOCTOR_RULE = "─".repeat(37); // 37 box-drawing horizontals
-const DOCTOR_RUNTIME_LABEL = "Runtime hook PATH: bun ->";
+const DOCTOR_HEADER = "AI-DLC doctor";
+const DOCTOR_RUNTIME_LABEL = "Runtime hook PATH: bun";
 const DOCTOR_HOOK_LABEL = "aidlc-write-audit-log.ts present";
 const DOCTOR_SETTINGS_LABEL = "settings.json present";
-const DOCTOR_DOCS_LABEL = "aidlc-docs/ directory exists";
+const DOCTOR_DOCS_LABEL = "workspace shell ready";
 
 // ---------------------------------------------------------------------------
 
@@ -106,7 +105,8 @@ describe("sdk-drive calibration (known-answer)", () => {
 
         // Prove WHICH gate fired without scraping the TUI: the first menu is
         // the resume gate. assertAskedQuestion fails loudly if absent.
-        assertAskedQuestion(r, "proceed");
+        assertAskedQuestion(r, "workflow");
+        assertAskedQuestion(r, "stage");
 
         // The driver records the answer it handed back to the SDK. For a
         // captured-and-answered gate this is a real option label, not empty —
@@ -169,7 +169,6 @@ describe("sdk-drive calibration (known-answer)", () => {
         // contain the exact doctor strings. assertToolResultContains fails
         // loudly if Bash never fired (no vacuous pass) — see calibration 4.
         assertToolResultContains(rA, "Bash", DOCTOR_HEADER);
-        assertToolResultContains(rA, "Bash", DOCTOR_RULE);
         assertToolResultContains(rA, "Bash", DOCTOR_RUNTIME_LABEL);
         assertToolResultContains(rA, "Bash", DOCTOR_HOOK_LABEL);
         assertToolResultContains(rA, "Bash", DOCTOR_SETTINGS_LABEL);
@@ -180,13 +179,13 @@ describe("sdk-drive calibration (known-answer)", () => {
         // tool_result and re-assert the structural shape on THOSE bytes.
         const blockA = extractDoctorBlock(rA);
         expect(blockA).not.toBeNull();
-        // The block carries the box-rule and the "N passed, M failed" footer
-        // verbatim — shape the LLM prose does not reliably reproduce.
-        expect(blockA!).toContain(DOCTOR_RULE);
-        expect(blockA!).toMatch(/\d+ passed, \d+ failed/);
-        // The verbatim block uses the tool's ✓ check glyph + two spaces,
-        // exactly as handleDoctor writes it (utility.ts:1361).
-        expect(blockA!).toContain(`✓  ${DOCTOR_RUNTIME_LABEL}`);
+        // The block carries the grouped sections and closing problem/warning
+        // footer verbatim, a shape the LLM prose does not reliably reproduce.
+        expect(blockA!).toContain("Machine");
+        expect(blockA!).toContain("Project");
+        expect(blockA!).toContain("Framework integrity");
+        expect(blockA!).toMatch(/\d+ problems?, \d+ warnings?\./);
+        expect(blockA!).toContain(`warn  ${DOCTOR_RUNTIME_LABEL}`);
 
         // Stability: a second independent run must yield a byte-identical
         // doctor block (deterministic stdout). We compare from the header to
@@ -344,7 +343,7 @@ describe("sdk-drive calibration (known-answer)", () => {
           toolName: "Bash",
           input: { command: "doctor" },
           toolUseId: "tu_2",
-          resultText: `${DOCTOR_HEADER}\n${DOCTOR_RULE}\n`,
+          resultText: `${DOCTOR_HEADER}\n\n0 problems, 0 warnings.\n`,
           isError: false,
         } satisfies CapturedToolResult,
       ],
@@ -363,8 +362,8 @@ describe("sdk-drive calibration (known-answer)", () => {
 
 // ---------------------------------------------------------------------------
 // Helper: isolate the verbatim doctor stdout block out of the Bash
-// tool_result(s). Slices from the "AI-DLC Health Check" header through the
-// "N passed, M failed" footer so an LLM preamble/postamble around the
+// tool_result(s). Slices from the "AI-DLC doctor" header through the
+// "N problems, M warnings." footer so an LLM preamble/postamble around the
 // tool_result cannot perturb the byte-stability comparison. Returns null if no
 // Bash tool_result carries the header.
 // ---------------------------------------------------------------------------
@@ -373,7 +372,7 @@ function extractDoctorBlock(result: DriveResult): string | null {
     if (t.toolName !== "Bash") continue;
     const start = t.resultText.indexOf(DOCTOR_HEADER);
     if (start === -1) continue;
-    const footer = t.resultText.match(/\d+ passed, \d+ failed/);
+    const footer = t.resultText.match(/\d+ problems?, \d+ warnings?\./);
     if (!footer || footer.index === undefined) continue;
     const end = footer.index + footer[0].length;
     return t.resultText.slice(start, end);
@@ -381,12 +380,13 @@ function extractDoctorBlock(result: DriveResult): string | null {
   return null;
 }
 
-// Replace the wall-clock timestamp on the "Hooks last fired" line with a fixed
-// token so byte-stability can be asserted on the deterministic remainder. Only
-// this line carries a per-run timestamp (utility.ts:430).
+// Replace scratch-root and heartbeat timestamp variance so byte-stability can
+// be asserted on the deterministic report content.
 function normalizeHeartbeat(block: string): string {
-  return block.replace(
-    /(Hooks last fired:.*?)\d{4}-\d{2}-\d{2}T[\d:]+Z/g,
-    "$1<TS>",
-  );
+  return block
+    .replaceAll(/\/tmp\/aidlc-test-[^/]+/g, "<PROJECT>")
+    .replace(
+      /(Hooks last fired:.*)$/m,
+      (line) => line.replaceAll(/\d{4}-\d{2}-\d{2}T[\d:]+Z/g, "<TS>"),
+    );
 }

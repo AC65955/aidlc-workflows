@@ -234,15 +234,15 @@ describe("t275 dist/cursor packaging parity + shell shape", () => {
           env: { ...process.env, AIDLC_HARNESS_DIR: ".cursor" },
         },
       );
-      expect(r.stdout).toContain("✓  aidlc-cursor-adapter.ts present");
-      expect(r.stdout).toContain("✓  hooks.json present (hook wiring)");
-      expect(r.stdout).toContain("✓  cli.json present (Shell(bun) permission pre-approval)");
+      expect(r.stdout).toContain("ok    aidlc-cursor-adapter.ts present");
+      expect(r.stdout).toContain("ok    hooks.json present (hook wiring)");
+      expect(r.stdout).toContain("ok    cli.json present (Shell(bun) permission pre-approval)");
       expect(r.stdout).toContain(
-        "✓  rules/aidlc.mdc present (standing method rule (alwaysApply read instruction))",
+        "ok    rules/aidlc.mdc present (standing method rule (alwaysApply read instruction))",
       );
       for (const phase of ["Ideation", "Inception", "Construction", "Operation"]) {
         expect(r.stdout).toContain(
-          `✓  rules/aidlc-phase-${phase.toLowerCase()}.mdc present (${phase} phase rule (agent-decided read instruction))`,
+          `ok    rules/aidlc-phase-${phase.toLowerCase()}.mdc present (${phase} phase rule (agent-decided read instruction))`,
         );
       }
     } finally {

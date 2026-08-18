@@ -2671,8 +2671,8 @@ describe("t188 plugin compose — emit + compose the contribution seam", () => {
     const dropRowLines = out.split("\n").filter((l) => l.includes("Hook drops"));
     return {
       out,
-      failRow: dropRowLines.some((l) => l.includes("✗")),
-      passRow: dropRowLines.some((l) => l.includes("✓")),
+      failRow: dropRowLines.some((l) => l.trimStart().startsWith("fail")),
+      passRow: dropRowLines.some((l) => l.trimStart().startsWith("ok")),
     };
   }
 

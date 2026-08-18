@@ -586,6 +586,15 @@ Successful config prints the host-specific next step:
 | `aidlc config --pin <x.y.z>` | Install and validate the exact version when needed, then atomically write `.aidlc-version`, record its machine-local resolved target, and register the project pin without changing the machine-active pointer. |
 | `aidlc config --unpin` | Remove `.aidlc-version`, its machine-local resolved target, and its registry entry. |
 
+Human lifecycle output states each completed fact. Update reports the
+old-to-new version check, verified download, atomic switch, retained prior
+version, any pruned unprotected releases, and the project-refresh courtesy.
+A no-op says `You're on the latest version of aidlc (<version>).`; `--dry-run`
+says `Would update aidlc from <old> to <new>.`. `aidlc use` distinguishes
+`Now using` from `Already using`, and uninstall states exactly which machine
+state was removed or kept. JSON and quiet messages retain their stable machine
+contracts.
+
 Update downloads and fully validates a candidate before changing the active
 pointer. Failed updates automatically restore the prior consistent
 installation. A successful update retains the prior active version and every
@@ -722,7 +731,10 @@ The native diagnostic form is
 [--check-updates] [--release-base-url <url>] [--ca-bundle <path>]
 [--offline]`. `--export` writes a redacted diagnostic bundle, with
 `--output <directory>` overriding its default project location; export output
-is additional to the selected live-report mode.
+is additional to the selected live-report mode. Human output groups Machine,
+Project, and Framework integrity checks. Framework details collapse by default
+and expand with `--verbose`. Warnings are advisory and exit 0; any failed check
+exits 1.
 
 `--no-color` and `NO_COLOR` disable ANSI output. `--project-dir <path>` selects
 project context without changing the shell directory. Destructive operations

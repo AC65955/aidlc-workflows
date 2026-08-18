@@ -833,8 +833,54 @@ describe("t244 management lifecycle", () => {
       "update", "--version", NEXT_VERSION, "--from", nextRelease,
     ], project, env);
     expect(updated.status, updated.stdout + updated.stderr).toBe(0);
-    expect(updated.stdout).toContain(`updated ${AIDLC_VERSION} -> ${NEXT_VERSION}`);
-    expect(updated.stdout).toContain(`pruned ${REMOVABLE_VERSION}`);
+    expect(updated.stdout).toContain(
+      `Checking for releases ... ${AIDLC_VERSION} -> ${NEXT_VERSION}`,
+    );
+    expect(updated.stdout).toContain(
+      `Downloading aidlc ${NEXT_VERSION} ... done (verified)`,
+    );
+    expect(updated.stdout).toContain(
+      `Staging and switching ... done (${AIDLC_VERSION} retained)`,
+    );
+    expect(updated.stdout).toContain(
+      `Updated aidlc from ${AIDLC_VERSION} to ${NEXT_VERSION}.`,
+    );
+    expect(updated.stdout).toContain(`Pruned unprotected releases: ${REMOVABLE_VERSION}.`);
+    const noop = run(LIFECYCLE, [
+      "update", "--version", NEXT_VERSION, "--from", nextRelease,
+    ], project, env);
+    expect(noop.status, noop.stdout + noop.stderr).toBe(0);
+    expect(noop.stdout).toContain(
+      `You're on the latest version of aidlc (${NEXT_VERSION}).`,
+    );
+    const dryRun = run(LIFECYCLE, [
+      "update", "--version", STALE_PIN_VERSION, "--from", stalePinRelease,
+      "--dry-run",
+    ], project, env);
+    expect(dryRun.status, dryRun.stdout + dryRun.stderr).toBe(0);
+    expect(dryRun.stdout).toContain(
+      `Would update aidlc from ${NEXT_VERSION} to ${STALE_PIN_VERSION}.`,
+    );
+    const dryRunJson = run(LIFECYCLE, [
+      "update", "--version", STALE_PIN_VERSION, "--from", stalePinRelease,
+      "--dry-run", "--json",
+    ], project, env);
+    expect(JSON.parse(dryRunJson.stdout).message).toContain(
+      `update plan: ${NEXT_VERSION} -> ${STALE_PIN_VERSION}`,
+    );
+    const usePrior = run(LIFECYCLE, ["use", AIDLC_VERSION], project, env);
+    expect(usePrior.status, usePrior.stdout + usePrior.stderr).toBe(0);
+    expect(usePrior.stdout).toContain(
+      `Now using aidlc ${AIDLC_VERSION} (was ${NEXT_VERSION}; retained locally, no project changes).`,
+    );
+    const useNext = run(LIFECYCLE, ["use", NEXT_VERSION], project, env);
+    expect(useNext.status, useNext.stdout + useNext.stderr).toBe(0);
+    expect(useNext.stdout).toContain(
+      `Now using aidlc ${NEXT_VERSION} (was ${AIDLC_VERSION}; retained locally, no project changes).`,
+    );
+    const useNoop = run(LIFECYCLE, ["use", NEXT_VERSION], project, env);
+    expect(useNoop.status, useNoop.stdout + useNoop.stderr).toBe(0);
+    expect(useNoop.stdout).toContain(`Already using aidlc ${NEXT_VERSION}.`);
     for (const version of [AIDLC_VERSION, NEXT_VERSION, LIVE_PIN_VERSION, STALE_PIN_VERSION]) {
       expect(existsSync(join(machine, "versions", version))).toBe(true);
     }
@@ -887,7 +933,13 @@ describe("t244 management lifecycle", () => {
     writeFileSync(join(machine, "pins.json"), "{}\n");
 
     expect(run(LIFECYCLE, ["uninstall"], project, env).status).toBe(2);
-    expect(run(LIFECYCLE, ["uninstall", "--yes"], project, env).status).toBe(0);
+    const uninstall = run(LIFECYCLE, ["uninstall", "--yes"], project, env);
+    expect(uninstall.status).toBe(0);
+    if (process.platform !== "win32") {
+      expect(uninstall.stdout).toContain(
+        "Removed aidlc and all retained releases. Machine settings, update cache, pins, harness default, and project files were kept.",
+      );
+    }
     await waitForAbsent([join(machine, "versions"), command]);
     await waitForPresent([
       join(machine, "aidlc.settings.json"),
@@ -905,7 +957,13 @@ describe("t244 management lifecycle", () => {
       "update", "--version", AIDLC_VERSION, "--from", release,
     ], project, env).status).toBe(0);
     writeFileSync(join(machine, "default-harness"), "claude\n");
-    expect(run(LIFECYCLE, ["uninstall", "--purge", "--yes"], project, env).status).toBe(0);
+    const purge = run(LIFECYCLE, ["uninstall", "--purge", "--yes"], project, env);
+    expect(purge.status).toBe(0);
+    if (process.platform !== "win32") {
+      expect(purge.stdout).toContain(
+        "Removed aidlc, all retained releases, machine settings, update cache, pins, and harness default. Project files were kept.",
+      );
+    }
     await waitForAbsent([
       join(machine, "versions"),
       command,
