@@ -930,6 +930,7 @@ describe("mechanismsOf is body-derived (milestone 3)", () => {
     "unit/t295-config-choices.test.ts",
     "unit/t296-config-setup-walk.test.ts",
     "unit/t298-settings-hierarchy.test.ts",
+    "unit/t299-first-run-wizard.test.ts",
     "unit/t255-workspace-sync.test.ts",
     "unit/t27.test.ts",
     "unit/t29.test.ts",

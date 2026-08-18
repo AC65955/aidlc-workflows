@@ -144,18 +144,31 @@ outstanding item and the exact `aidlc config runtime`, `aidlc config trust`, or
 `data.outstandingActions`. Quiet output stays one line when clean and appends
 one outstanding-actions line when follow-up is required.
 
-On a human TTY, a successful bare `aidlc config` also renders a seven-row
-Project setup map for Harnesses, Models, Trust, Flags, Project, Runtime, and
-Providers. Defaults stay `[ok]`; only runtime, provider, or trust findings are
-marked `[NEEDS]`. One `[Y/n]` gate offers to walk those flagged sections in
-runtime, providers, trust order through their existing questions. Enter means
-yes. `--yes` still does not answer this choice. A healthy rerun shows all seven
-rows as `[ok]` and asks nothing. Section-named commands, non-TTY runs,
-`--dry-run`, `--json`, and `--quiet` keep their existing output and never
-render the map. On the TTY path, the map replaces the pre-map outstanding
-block. Accepting the gate ends with the remaining-action ledger after the walk;
-declining prints that ledger immediately, so each path keeps the exact issue
-ids and remediation commands without repeating them before the map.
+On a human TTY, a bare first run starts with detection rather than questions:
+installed harness CLIs on `PATH`, project state, local AWS credentials and
+regions, and the non-interactive hook runtime. With one detected harness, the
+wizard names it and offers three choices: recommended defaults, six-step
+customization, or exit with nothing written. Multiple detected harnesses get a
+numbered harness picker first; no detected harness gets the complete picker
+without a default.
+
+Recommended defaults state the bundle on the option line. Customization walks
+Harness, Model provider, Model effort preset, Plugins, MCP servers, and settings
+layer. Every numbered prompt has a bracketed default, invalid input re-asks in
+place, and each answer is echoed. A check-your-answers table accepts Enter to
+apply or a step number to edit. No files are written before that final gate.
+After apply, gerund receipts name the project files and settings layer,
+genuinely blocking actions follow, then the wizard prints the exact harness
+launch and first workflow command.
+
+An existing-project rerun keeps the seven-row map for Harnesses, Models,
+Runtime, Flags, Project, Providers, and Trust. Rows are lowercase `[ok]` or
+`[needs]`; one default-yes gate walks only Runtime, Providers, and Trust
+findings. Runtime leads with the immediate action and points to
+`aidlc config runtime --show` for diagnostics. The closing ledger is a compact
+label-to-command list. Section-named commands, non-TTY runs, `--dry-run`,
+`--json`, and `--quiet` keep their deterministic output and never render the
+interactive wizard.
 
 ### Config Options
 

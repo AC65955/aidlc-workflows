@@ -117,7 +117,7 @@ function run(
 
 function setupRows(output: string): string[] {
   return output.split(/\r?\n/).filter((line) =>
-    /^\s+\[(?:ok|NEEDS)\]/.test(line)
+    /^\s+\[(?:ok|needs)\]/.test(line)
   );
 }
 
@@ -131,7 +131,7 @@ describe("t296 first-run config setup walk", () => {
       "n\n",
     );
     expect(result.status, result.stdout + result.stderr).toBe(0);
-    expect(result.stdout).toContain("Project setup: 2 of 7 sections need you");
+    expect(result.stdout).toContain("Setup check - 2 of 7 sections need you.");
     expect(setupRows(result.stdout)).toHaveLength(7);
     for (const label of [
       "Harnesses",
@@ -145,14 +145,14 @@ describe("t296 first-run config setup walk", () => {
       expect(setupRows(result.stdout).some((line) => line.includes(label))).toBe(true);
     }
     expect(setupRows(result.stdout).find((line) => line.includes("Runtime")))
-      .toContain("[NEEDS]");
+      .toContain("[needs]");
     expect(setupRows(result.stdout).find((line) => line.includes("Providers")))
-      .toContain("[NEEDS]");
-    expect(result.stdout.match(/Walk through the 2 sections that need you now\?/g))
+      .toContain("[needs]");
+    expect(result.stdout.match(/Fix the 2 sections that need you now\?/g))
       .toHaveLength(1);
     expect(result.stdout).not.toContain("Outstanding actions:");
-    expect(result.stdout).toContain("Config complete. 1 action still needs you");
-    expect(result.stdout).toContain("runtime/runtime-aidlc-missing");
+    expect(result.stdout).toContain("Setup complete. 1 action still needs you");
+    expect(result.stdout).toContain("runtime      aidlc config runtime");
     expect(result.stdout.match(/aidlc is absent from the non-interactive hook PATH/g))
       .toHaveLength(1);
     expect(result.stdout.match(/no recorded answers; provider access unverified/g))
@@ -176,17 +176,17 @@ describe("t296 first-run config setup walk", () => {
       "\n\nus-west-2\ndev\ny\n",
     );
     expect(result.status, result.stdout + result.stderr).toBe(0);
-    expect(result.stdout).toContain("Project setup: 1 of 7 sections need you");
+    expect(result.stdout).toContain("Setup check - 1 of 7 sections need you.");
     expect(setupRows(result.stdout).find((line) => line.includes("Runtime")))
       .toContain("[ok]");
     expect(setupRows(result.stdout).find((line) => line.includes("Providers")))
-      .toContain("[NEEDS]");
-    expect(result.stdout).toContain("Provider [Enter amazon-bedrock, other]:");
+      .toContain("[needs]");
+    expect(result.stdout).toContain("Provider [1]:");
     expect(result.stdout).not.toContain("Apply providers configuration changes?");
     expect(result.stdout).not.toContain("Runtime configuration for");
     expect(result.stdout).not.toContain("Trust configuration for");
     expect(result.stdout).not.toContain("Outstanding actions:");
-    expect(result.stdout).toContain("Config complete. 0 actions still need you");
+    expect(result.stdout).toContain("Setup complete. 0 actions still need you");
 
     const records = readConfigDiagnosticRecords(join(path, ".claude"));
     expect(records.providers).toEqual(expect.objectContaining({
@@ -214,9 +214,9 @@ describe("t296 first-run config setup walk", () => {
       env,
     );
     expect(rerun.status, rerun.stdout + rerun.stderr).toBe(0);
-    expect(rerun.stdout).toContain("Project setup: 0 of 7 sections need you");
+    expect(rerun.stdout).toContain("Setup check - 0 of 7 sections need you.");
     expect(setupRows(rerun.stdout)).toHaveLength(7);
-    expect(rerun.stdout).not.toContain("Walk through the");
+    expect(rerun.stdout).not.toContain("Fix the");
 
     const runtimeWalk = run(
       [
@@ -232,11 +232,11 @@ describe("t296 first-run config setup walk", () => {
       "\n",
     );
     expect(runtimeWalk.status, runtimeWalk.stdout + runtimeWalk.stderr).toBe(0);
-    expect(runtimeWalk.stdout).toContain("Project setup: 1 of 7 sections need you");
+    expect(runtimeWalk.stdout).toContain("Setup check - 1 of 7 sections need you.");
     expect(runtimeWalk.stdout).not.toContain("Outstanding actions:");
-    expect(runtimeWalk.stdout).toContain("Config complete. 1 action still needs you");
-    expect(runtimeWalk.stdout).toMatch(
-      /\.\.\. and \d+ more \(aidlc config runtime --show --json lists all\)/,
+    expect(runtimeWalk.stdout).toContain("Setup complete. 1 action still needs you");
+    expect(runtimeWalk.stdout).toContain(
+      "Full diagnostics: aidlc config runtime --show",
     );
   }, 60_000);
 
@@ -263,7 +263,7 @@ describe("t296 first-run config setup walk", () => {
     );
     expect(json.status, json.stdout + json.stderr).toBe(0);
     expect(() => JSON.parse(json.stdout)).not.toThrow();
-    expect(json.stdout).not.toContain("Project setup:");
+    expect(json.stdout).not.toContain("Setup check -");
 
     const quietProject = project("aidlc-t296-quiet-");
     const quiet = run(
@@ -273,7 +273,7 @@ describe("t296 first-run config setup walk", () => {
     );
     expect(quiet.status, quiet.stdout + quiet.stderr).toBe(0);
     expect(quiet.stdout.trim().split("\n")).toHaveLength(1);
-    expect(quiet.stdout).not.toContain("Project setup:");
+    expect(quiet.stdout).not.toContain("Setup check -");
 
     const dryProject = project("aidlc-t296-dry-");
     const dry = run(
@@ -282,7 +282,7 @@ describe("t296 first-run config setup walk", () => {
       hookPathEnv(null, true),
     );
     expect(dry.status, dry.stdout + dry.stderr).toBe(0);
-    expect(dry.stdout).not.toContain("Project setup:");
+    expect(dry.stdout).not.toContain("Setup check -");
     expect(existsSync(join(dryProject, ".claude"))).toBe(false);
   }, 60_000);
 });

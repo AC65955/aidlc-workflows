@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -13,6 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { extractTarGz } from "./aidlc-archive.ts";
 import {
   EXIT,
@@ -69,6 +71,7 @@ import {
 } from "./aidlc-utility.ts";
 import {
   discoverProjectHarnesses,
+  isCompiledExecutable,
 } from "./aidlc-runtime-paths.ts";
 import {
   activeModelGroups,
@@ -110,6 +113,7 @@ import {
   normalizeTrustRecord,
   pendingProviderIssues,
   postApplyOutstandingActions,
+  probeHarnessCli,
   probeRuntime,
   providerFiles,
   providerIssues,
@@ -1240,40 +1244,76 @@ function diagnosticWizard(
   projectDir: string,
   selected: ReturnType<typeof selectedDiagnosticHarness>,
   records: ConfigDiagnosticRecords,
-  options: ReturnType<typeof globalOptions>,
+  _options: ReturnType<typeof globalOptions>,
 ): RuntimeRecord | ProvidersRecord | TrustRecord | null {
-  showDiagnosticSection(section, projectDir, selected, records, {
-    ...options,
-    mode: "human",
-  });
   if (section === "runtime") {
     const diagnostics = probeRuntime(projectDir, selected.harnessDir, selected.harness);
     const issues = runtimeIssues(diagnostics);
     if (issues.length > 0) {
-      process.stdout.write("Runtime fixes are instruct-only because changing hook command prefixes would invalidate host trust entries.\n");
-      for (const issue of issues) process.stdout.write(`  ${issue.remediation}\n`);
+      process.stdout.write("\n  Runtime needs one manual action:\n\n");
+      for (const issue of issues) {
+        process.stdout.write(`    ${issue.remediation}\n`);
+      }
+      process.stdout.write(
+        "\n  Full diagnostics: aidlc config runtime --show\n\n",
+      );
       return records.runtime;
     }
-    const answer = prompt("Record the detected non-interactive runtime paths? [y/N]:");
-    return answer && /^y(?:es)?$/i.test(answer.trim())
-      ? runtimeRecordFromProbe(projectDir, selected)
-      : records.runtime;
+    const answer = promptYesDefault(
+      "  Record the detected non-interactive runtime paths?",
+      false,
+    );
+    process.stdout.write(
+      answer
+        ? "  Using the detected runtime paths.\n\n"
+        : "  Leaving runtime paths unchanged.\n\n",
+    );
+    return answer ? runtimeRecordFromProbe(projectDir, selected) : records.runtime;
   }
   if (section === "providers") {
-    const providerAnswer = prompt("Provider [Enter amazon-bedrock, other]:")?.trim() || "amazon-bedrock";
-    if (providerAnswer !== "amazon-bedrock" && providerAnswer !== "other") {
-      throw new Error("provider selection cancelled");
-    }
+    const credentials = detectAwsCredentials();
+    const detected = awsSummary(credentials);
+    process.stdout.write("\n  Model provider\n");
+    process.stdout.write(
+      credentials.hasCredentials
+        ? `  Found AWS credentials (${detected.source}); detected region ${detected.region}.\n`
+        : "  No AWS credentials were detected.\n",
+    );
+    process.stdout.write(`    1. amazon-bedrock   ${
+      credentials.hasCredentials ? "(detected, default)" : ""
+    }\n`);
+    process.stdout.write("    2. other\n");
+    const providerAnswer = promptChoice(
+      "  Provider",
+      2,
+      credentials.hasCredentials ? 1 : 2,
+    ) === 1
+      ? "amazon-bedrock"
+      : "other";
     const args = ["--provider", providerAnswer];
     const skipMarkDone = new Set<string>();
     if (providerAnswer === "amazon-bedrock") {
-      const region = prompt("AWS region [Enter us-east-1]:")?.trim() || "us-east-1";
-      const profile = prompt("AWS profile [Enter default credential chain]:")?.trim();
+      const region = promptTextDefault("  AWS region", detected.region);
+      const profileAnswer = promptTextDefault(
+        "  AWS profile",
+        "default credential chain",
+      );
+      const profile = profileAnswer === "default credential chain"
+        ? ""
+        : profileAnswer;
       args.push("--region", region);
       if (profile) args.push("--profile", profile);
+      process.stdout.write(
+        `  Using amazon-bedrock in ${region} with ${
+          profile || "the default credential chain"
+        }.\n\n`,
+      );
       if (selected.harness === "opencode") {
-        const offer = prompt("Write amazon-bedrock provider options to opencode.json? [y/N]:");
-        args.push("--opencode-default", offer && /^y(?:es)?$/i.test(offer.trim()) ? "yes" : "no");
+        const offer = promptYesDefault(
+          "  Write amazon-bedrock provider options to opencode.json?",
+          false,
+        );
+        args.push("--opencode-default", offer ? "yes" : "no");
       }
       if (selected.harness === "copilot" || selected.harness === "cursor") {
         process.stdout.write(
@@ -1281,8 +1321,11 @@ function diagnosticWizard(
             ? "Configure Copilot BYOK provider variables before acknowledging this step.\n"
             : "Configure the provider and select the model in Cursor before acknowledging this step.\n",
         );
-        const acknowledged = prompt("Manual provider setup complete? [y/N]:");
-        if (acknowledged && /^y(?:es)?$/i.test(acknowledged.trim())) {
+        const acknowledged = promptYesDefault(
+          "  Manual provider setup complete?",
+          false,
+        );
+        if (acknowledged) {
           args.push("--acknowledge");
         } else {
           const action = selected.harness === "copilot"
@@ -1295,16 +1338,22 @@ function diagnosticWizard(
         }
       }
     } else {
-      process.stdout.write("Non-Bedrock provider setup is manual for the selected harness.\n");
-      const acknowledged = prompt("Manual provider setup complete? [y/N]:");
-      if (acknowledged && /^y(?:es)?$/i.test(acknowledged.trim())) args.push("--acknowledge");
+      process.stdout.write("  Using other provider setup.\n");
+      const acknowledged = promptYesDefault(
+        "  Manual provider setup complete?",
+        false,
+      );
+      if (acknowledged) args.push("--acknowledge");
     }
     let next = providerRecordFromArgs(records.providers, args, selected);
     for (const action of next.pendingActions ?? []) {
       if (action.status === "done") continue;
       if (skipMarkDone.has(action.id)) continue;
-      const answer = prompt(`Mark ${action.id} done now? [y/N]:`);
-      if (answer && /^y(?:es)?$/i.test(answer.trim())) {
+      const answer = promptYesDefault(
+        `  Mark ${action.id} done now?`,
+        false,
+      );
+      if (answer) {
         next = providerRecordFromArgs(
           next,
           ["--mark-done", action.id],
@@ -1314,8 +1363,16 @@ function diagnosticWizard(
     }
     return next;
   }
-  const answer = prompt("Record that you reviewed the trust and allowlist files? [y/N]:");
-  return answer && /^y(?:es)?$/i.test(answer.trim())
+  const answer = promptYesDefault(
+    "  Record that you reviewed the trust and allowlist files?",
+    false,
+  );
+  process.stdout.write(
+    answer
+      ? "  Trust review acknowledged.\n\n"
+      : "  Leaving trust acknowledgement unchanged.\n\n",
+  );
+  return answer
     ? { schemaVersion: 1, reviewed: true }
     : records.trust;
 }
@@ -1455,10 +1512,12 @@ function setupMapRows(
       needs: false,
     },
     {
-      label: "Trust",
-      detail: trustDetail,
-      section: "trust",
-      needs: trust.length > 0,
+      label: "Runtime",
+      detail: runtime.length > 0
+        ? runtime[0].message
+        : "hook PATH ready",
+      section: "runtime",
+      needs: runtime.length > 0,
     },
     {
       label: "Flags",
@@ -1471,18 +1530,16 @@ function setupMapRows(
       needs: false,
     },
     {
-      label: "Runtime",
-      detail: runtime.length > 0
-        ? `${runtime.length} hook PATH issue${runtime.length === 1 ? "" : "s"}`
-        : "hook PATH ready",
-      section: "runtime",
-      needs: runtime.length > 0,
-    },
-    {
       label: "Providers",
       detail: providerDetail,
       section: "providers",
       needs: providerNeeds,
+    },
+    {
+      label: "Trust",
+      detail: trustDetail,
+      section: "trust",
+      needs: trust.length > 0,
     },
   ];
 }
@@ -1490,10 +1547,10 @@ function setupMapRows(
 function renderSetupMap(rows: readonly SetupMapRow[]): SetupWalkSection[] {
   const needed = rows.filter((row) => row.needs);
   process.stdout.write(
-    `  Project setup: ${needed.length} of ${rows.length} sections need you\n`,
+    `\n  Setup check - ${needed.length} of ${rows.length} sections need you.\n\n`,
   );
   for (const row of rows) {
-    const state = row.needs ? "[NEEDS]" : "[ok]";
+    const state = row.needs ? "[needs]" : "[ok]";
     process.stdout.write(
       `    ${state.padEnd(7)}  ${row.label.padEnd(11)} ${row.detail}\n`,
     );
@@ -1511,13 +1568,13 @@ function renderSetupLedger(
   actions: readonly ConfigOutstandingAction[],
 ): void {
   process.stdout.write(
-    `Config complete. ${actions.length} action${
+    `\n  Setup complete. ${actions.length} action${
       actions.length === 1 ? "" : "s"
     } still need${actions.length === 1 ? "s" : ""} you\n`,
   );
   for (const action of actions) {
     process.stdout.write(
-      `  ${action.section}/${action.id}: ${action.message} - run \`${action.command}\`\n`,
+      `    ${action.section.padEnd(12)} ${action.command}\n`,
     );
   }
 }
@@ -1543,10 +1600,11 @@ async function runSetupWalk(
     }
     return;
   }
-  const answer = prompt(
-    `Walk through the ${flagged.length} sections that need you now? [Y/n]:`,
+  const answer = promptYesDefault(
+    `\n  Fix the ${flagged.length} sections that need you now?`,
+    true,
   );
-  if (answer && !/^y(?:es)?$/i.test(answer)) {
+  if (!answer) {
     renderSetupLedger(initialOutstanding);
     return;
   }
@@ -2307,7 +2365,7 @@ function prepareChoiceSection(
       mcpMode = built.record.mcp;
     }
   } else {
-    if (!process.stdin.isTTY) {
+    if (!configInputIsTty()) {
       const flags = section === "flags"
         ? "--default-scope, --swarm, --hook-debug, --sensor-timeout-ms, --bypass, or --reset"
         : "--plugins, --mcp, --completions, or --reset";
@@ -2367,7 +2425,7 @@ function prepareChoiceSection(
     return null;
   }
   if (!argv.includes("--dry-run") && !options.yes) {
-    if (!process.stdin.isTTY) {
+    if (!configInputIsTty()) {
       emitResult(
         usage(
           `non-interactive ${section} mutation requires --yes; --yes confirms but never chooses`,
@@ -3183,6 +3241,30 @@ function configuredDefaultHarness(): string | undefined {
   return value;
 }
 
+type InstalledSourceCandidate = {
+  root: string;
+  stamp: ReturnType<typeof projectionFiles>["stamp"];
+  descriptor: ReturnType<typeof projectionFiles>["descriptor"];
+};
+
+function installedSourceCandidates(
+  requiredVersion?: string,
+): InstalledSourceCandidate[] {
+  const candidates = installedSources(requiredVersion).flatMap((root) => {
+    try {
+      const projection = projectionFiles(root);
+      return [{ root, stamp: projection.stamp, descriptor: projection.descriptor }];
+    } catch {
+      return [];
+    }
+  });
+  return requiredVersion
+    ? candidates.filter((candidate) =>
+        candidate.stamp.frameworkVersion === requiredVersion
+      )
+    : candidates;
+}
+
 function selectSource(
   requested: string | undefined,
   from: string | undefined,
@@ -3202,20 +3284,9 @@ function selectSource(
     }
     return source;
   }
-  const candidates = installedSources(requiredVersion).flatMap((root) => {
-    try {
-      const projection = projectionFiles(root);
-      return [{ root, stamp: projection.stamp, descriptor: projection.descriptor }];
-    } catch {
-      return [];
-    }
-  });
+  const candidates = installedSourceCandidates(requiredVersion);
   const selectedName = existingDistribution || requested;
-  const versionFiltered = requiredVersion
-    ? candidates.filter((candidate) =>
-        candidate.stamp.frameworkVersion === requiredVersion
-      )
-    : candidates;
+  const versionFiltered = candidates;
   if (selectedName) {
     const selected = versionFiltered.filter((candidate) =>
       candidate.stamp.distribution === selectedName
@@ -3251,25 +3322,628 @@ function selectSource(
         : "no installed harness runtime is available",
     );
   }
-  if (process.stdin.isTTY) {
-    process.stdout.write("Select a harness for this project:\n");
+  if (configInputIsTty()) {
+    process.stdout.write("Select a harness for this project:\n\n");
     for (const [index, candidate] of versionFiltered.entries()) {
       process.stdout.write(
-        `  ${index + 1}) ${candidate.stamp.distribution} - ${candidate.descriptor.productName}\n`,
+        `  ${index + 1}. ${candidate.descriptor.productName}\n`,
       );
     }
-    const answer = prompt(`Harness [1-${versionFiltered.length}]:`);
-    const selected = answer && /^\d+$/.test(answer)
-      ? versionFiltered[Number(answer) - 1]
-      : undefined;
-    if (selected) return { root: selected.root };
-    throw new Error("harness selection cancelled; pass --harness <name>");
+    const selected = versionFiltered[
+      promptChoice("Harness", versionFiltered.length) - 1
+    ];
+    process.stdout.write(`Using ${selected.descriptor.productName}.\n`);
+    return { root: selected.root };
   }
   throw new Error(
     `multiple harnesses are installed; pass --harness <${
       versionFiltered.map((item) => item.stamp.distribution).join("|")
     }>`,
   );
+}
+
+type FirstRunDetection = {
+  harnesses: Record<string, { found: boolean; version?: string; path?: string }>;
+  aws: ReturnType<typeof detectAwsCredentials>;
+  runtimeIssues: ReturnType<typeof runtimeIssues>;
+  bedrockReachable?: boolean;
+};
+
+type FirstRunChoices = {
+  candidate: InstalledSourceCandidate;
+  provider: "amazon-bedrock" | "other";
+  region: string;
+  profile: string;
+  preset: "balanced" | "thorough" | "minimal";
+  plugins: string;
+  pluginLabel: string;
+  mcp: "defaults" | "none";
+  target: SettingsTarget;
+  providerVerified: boolean;
+};
+
+class FirstRunCancelled extends Error {}
+
+function firstRunPromptValue(value: string | null): string {
+  const normalized = value?.trim() ?? "";
+  if (normalized.includes("\u0003")) throw new FirstRunCancelled();
+  return normalized;
+}
+
+function promptChoice(
+  label: string,
+  count: number,
+  defaultIndex?: number,
+): number {
+  while (true) {
+    const suffix = defaultIndex === undefined
+      ? ` [1-${count}]`
+      : ` [${defaultIndex}]`;
+    const value = firstRunPromptValue(prompt(`${label}${suffix}:`));
+    if (!value && defaultIndex !== undefined) return defaultIndex;
+    if (/^\d+$/.test(value)) {
+      const selected = Number(value);
+      if (selected >= 1 && selected <= count) return selected;
+    }
+    process.stdout.write(
+      `\n  That's not one of the choices - enter ${
+        count === 2 ? "1 or 2" : `1, 2${count > 3 ? `, ... or ${count}` : ", or 3"}`
+      }.\n`,
+    );
+  }
+}
+
+function promptTextDefault(label: string, fallback: string): string {
+  return firstRunPromptValue(prompt(`${label} [${fallback}]:`)) || fallback;
+}
+
+function promptYesDefault(label: string, defaultYes = true): boolean {
+  while (true) {
+    const value = firstRunPromptValue(
+      prompt(`${label} [${defaultYes ? "Y/n" : "y/N"}]:`),
+    ).toLowerCase();
+    if (!value) return defaultYes;
+    if (value === "y" || value === "yes") return true;
+    if (value === "n" || value === "no") return false;
+    process.stdout.write("\n  Enter y or n.\n");
+  }
+}
+
+function injectedFirstRunDetection(): Partial<FirstRunDetection> | null {
+  const raw = process.env.AIDLC_TEST_CONFIG_DETECTION_JSON;
+  if (!raw) return null;
+  return JSON.parse(raw) as Partial<FirstRunDetection>;
+}
+
+function detectFirstRun(
+  _projectDir: string,
+  candidates: readonly InstalledSourceCandidate[],
+): FirstRunDetection {
+  const injected = injectedFirstRunDetection();
+  const harnesses: FirstRunDetection["harnesses"] = {};
+  for (const candidate of candidates) {
+    const override = injected?.harnesses?.[candidate.stamp.distribution];
+    if (override) {
+      harnesses[candidate.stamp.distribution] = override;
+      continue;
+    }
+    const probe = probeHarnessCli(modelHarness(candidate.stamp.distribution));
+    harnesses[candidate.stamp.distribution] = {
+      found: probe.status === "found",
+      ...(probe.version ? { version: probe.version } : {}),
+      ...(probe.path ? { path: probe.path } : {}),
+    };
+  }
+  const first = candidates[0];
+  const runtime = first
+    ? runtimeIssues(probeRuntime(
+        first.root,
+        first.descriptor.harnessDir,
+        modelHarness(first.stamp.distribution),
+        { includeHarnessCli: false },
+      ))
+    : [];
+  return {
+    harnesses,
+    aws: injected?.aws ?? detectAwsCredentials(),
+    runtimeIssues: injected?.runtimeIssues ?? runtime,
+    ...(injected?.bedrockReachable !== undefined
+      ? { bedrockReachable: injected.bedrockReachable }
+      : {}),
+  };
+}
+
+function detectedCandidateChoices(
+  candidates: readonly InstalledSourceCandidate[],
+  detection: FirstRunDetection,
+): InstalledSourceCandidate[] {
+  return candidates.filter((candidate) =>
+    detection.harnesses[candidate.stamp.distribution]?.found
+  );
+}
+
+function renderHarnessChoices(
+  candidates: readonly InstalledSourceCandidate[],
+  detection: FirstRunDetection,
+  defaultDistribution?: string,
+): void {
+  for (const [index, candidate] of candidates.entries()) {
+    const detected = detection.harnesses[candidate.stamp.distribution];
+    const tags = [
+      ...(detected?.found ? ["detected"] : []),
+      ...(candidate.stamp.distribution === defaultDistribution ? ["default"] : []),
+    ];
+    process.stdout.write(
+      `    ${index + 1}. ${candidate.descriptor.productName.padEnd(16)}${
+        tags.length > 0 ? `(${tags.join(", ")})` : ""
+      }\n`,
+    );
+  }
+}
+
+function chooseHarness(
+  candidates: readonly InstalledSourceCandidate[],
+  detection: FirstRunDetection,
+  defaultDistribution?: string,
+): InstalledSourceCandidate {
+  renderHarnessChoices(candidates, detection, defaultDistribution);
+  const defaultIndex = defaultDistribution
+    ? candidates.findIndex((candidate) =>
+        candidate.stamp.distribution === defaultDistribution
+      ) + 1
+    : undefined;
+  const selected = promptChoice(
+    "  Harness",
+    candidates.length,
+    defaultIndex && defaultIndex > 0 ? defaultIndex : undefined,
+  );
+  const candidate = candidates[selected - 1];
+  process.stdout.write(`  Using ${candidate.descriptor.productName}.\n\n`);
+  return candidate;
+}
+
+function awsSummary(credentials: ReturnType<typeof detectAwsCredentials>): {
+  source: string;
+  region: string;
+} {
+  return {
+    source: credentials.sources[0] ?? "default credential chain",
+    region: credentials.regions[0] ?? "us-east-1",
+  };
+}
+
+function runConfigChild(args: string[], cwd: string): Record<string, unknown> {
+  const env = { ...process.env };
+  delete env.AIDLC_TEST_CONFIG_TTY;
+  delete env.AIDLC_TEST_CONFIG_DETECTION_JSON;
+  const commandArgs = isCompiledExecutable()
+    ? ["config", ...args]
+    : [fileURLToPath(import.meta.url), "config", ...args];
+  const result = spawnSync(process.execPath, commandArgs, {
+    cwd,
+    env,
+    encoding: "utf-8",
+    input: "",
+    timeout: 120_000,
+  });
+  if (result.status !== 0) {
+    throw new Error((result.stdout || result.stderr || "configuration failed").trim());
+  }
+  return JSON.parse(result.stdout) as Record<string, unknown>;
+}
+
+function firstRunNextCommands(distribution: string): [string, string] {
+  if (distribution === "codex") {
+    return ["codex                         open Codex CLI in this repo", '$aidlc "what you want built"  describe your first intent'];
+  }
+  if (distribution === "kiro") {
+    return ["kiro-cli chat                  open Kiro CLI in this repo", '/aidlc "what you want built"  describe your first intent'];
+  }
+  if (distribution === "opencode") {
+    return ["opencode                       open opencode in this repo", '/aidlc "what you want built"  describe your first intent'];
+  }
+  if (distribution === "cursor") {
+    return ["cursor                         open Cursor in this repo", '/aidlc "what you want built"  describe your first intent'];
+  }
+  if (distribution === "kiro-ide") {
+    return ["kiro                          open Kiro IDE in this repo", '/aidlc "what you want built"  describe your first intent'];
+  }
+  if (distribution === "copilot") {
+    return ["copilot                        open Copilot CLI in this repo", '/aidlc "what you want built"  describe your first intent'];
+  }
+  return ["claude                         open Claude Code in this repo", '/aidlc "what you want built"  describe your first intent'];
+}
+
+function firstRunSettingsTargetLabel(target: SettingsTarget): string {
+  return target === "project"
+    ? "this project, committed"
+    : target === "local"
+    ? "this project, just for you"
+    : "this machine";
+}
+
+function applyFirstRunChoices(
+  projectDir: string,
+  choices: FirstRunChoices,
+): void {
+  const common = [
+    "--project-dir",
+    projectDir,
+    "--from",
+    choices.candidate.root,
+    "--harness",
+    choices.candidate.stamp.distribution,
+    "--mcp",
+    choices.mcp,
+    "--yes",
+    "--json",
+  ];
+  runConfigChild(common, projectDir);
+  runConfigChild([
+    "models",
+    "--project-dir",
+    projectDir,
+    `--${choices.target}`,
+    "--preset",
+    choices.preset,
+    "--yes",
+    "--json",
+  ], projectDir);
+  runConfigChild([
+    "project",
+    "--project-dir",
+    projectDir,
+    "--plugins",
+    choices.plugins,
+    "--mcp",
+    choices.mcp,
+    "--completions",
+    "none",
+    "--yes",
+    "--json",
+  ], projectDir);
+  const providerArgs = [
+    "providers",
+    "--project-dir",
+    projectDir,
+    "--provider",
+    choices.provider,
+  ];
+  if (choices.provider === "amazon-bedrock") {
+    providerArgs.push("--region", choices.region);
+    if (choices.profile) providerArgs.push("--profile", choices.profile);
+    if (choices.providerVerified) {
+      providerArgs.push("--mark-done", "bedrock-model-access");
+    }
+  } else {
+    providerArgs.push("--acknowledge");
+  }
+  providerArgs.push("--yes", "--json");
+  runConfigChild(providerArgs, projectDir);
+}
+
+function renderFirstRunEnding(
+  projectDir: string,
+  choices: FirstRunChoices,
+): void {
+  const manifest = JSON.parse(readFileSync(
+    join(
+      projectDir,
+      choices.candidate.descriptor.harnessDir,
+      "tools",
+      "data",
+      "aidlc-manifest.json",
+    ),
+    "utf-8",
+  )) as { files?: Record<string, string> };
+  const count = Object.keys(manifest.files ?? {}).length;
+  process.stdout.write(
+    `\n  Writing project files ... done  (${choices.candidate.descriptor.harnessDir}/ and aidlc/, ${count} files)\n`,
+  );
+  process.stdout.write(
+    `  Recording your choices ... done  (${
+      choices.target === "project"
+        ? "aidlc.settings.json in this project"
+        : choices.target === "local"
+        ? "aidlc.settings.local.json in this project"
+        : settingsPathForTarget(projectDir, choices.target)
+    })\n`,
+  );
+  const remaining = postApplyOutstandingActions(
+    projectDir,
+    choices.candidate.descriptor.harnessDir,
+    modelHarness(choices.candidate.stamp.distribution),
+  );
+  if (remaining.length > 0) {
+    process.stdout.write(
+      `\n  ${remaining.length === 1 ? "One thing needs you" : `${remaining.length} things need you`} - ${
+        remaining.length === 1 ? "it can't" : "they can't"
+      } be done automatically:\n\n`,
+    );
+    for (const action of remaining) {
+      if (action.id === "runtime-aidlc-missing") {
+        process.stdout.write(
+          "    Hooks run outside your shell profile, and aidlc isn't on that PATH.\n",
+        );
+        process.stdout.write("    Add this line to ~/.profile, then open a new shell:\n\n");
+        process.stdout.write('        export PATH="$HOME/.local/bin:$PATH"\n\n');
+        process.stdout.write(
+          "    Full diagnostics: aidlc config runtime --show\n\n",
+        );
+        continue;
+      }
+      process.stdout.write(`    ${action.message}\n`);
+      process.stdout.write(`    Run: ${action.command}\n\n`);
+    }
+  }
+  const [open, invoke] = firstRunNextCommands(
+    choices.candidate.stamp.distribution,
+  );
+  process.stdout.write("  Setup complete. Start your first workflow:\n\n");
+  process.stdout.write(`    ${open}\n`);
+  process.stdout.write(`    ${invoke}\n`);
+}
+
+function customizeFirstRun(
+  initial: InstalledSourceCandidate,
+  candidates: readonly InstalledSourceCandidate[],
+  detection: FirstRunDetection,
+): FirstRunChoices | null {
+  const aws = awsSummary(detection.aws);
+  const choices: FirstRunChoices = {
+    candidate: initial,
+    provider: detection.aws.hasCredentials ? "amazon-bedrock" : "other",
+    region: aws.region,
+    profile: "",
+    preset: "balanced",
+    plugins: "all",
+    pluginLabel: "all installed",
+    mcp: initial.stamp.distribution === "claude" ? "defaults" : "none",
+    target: "project",
+    providerVerified: detection.bedrockReachable === true,
+  };
+  const editStep = (step: number): void => {
+    if (step === 1) {
+      process.stdout.write("  Step 1 of 6 - Harness\n");
+      const detected = detectedCandidateChoices(candidates, detection);
+      process.stdout.write(
+        `  Detected on this machine: ${
+          detected.length > 0
+            ? detected.map((item) => item.descriptor.productName).join(", ")
+            : "none"
+        }.\n\n`,
+      );
+      choices.candidate = chooseHarness(
+        candidates,
+        detection,
+        choices.candidate.stamp.distribution,
+      );
+      choices.mcp = choices.candidate.stamp.distribution === "claude"
+        ? "defaults"
+        : "none";
+      return;
+    }
+    if (step === 2) {
+      process.stdout.write("  Step 2 of 6 - Model provider\n");
+      process.stdout.write(
+        detection.aws.hasCredentials
+          ? `  Found AWS credentials (${aws.source}); detected region ${aws.region}.\n`
+          : "  No AWS credentials were detected.\n",
+      );
+      process.stdout.write(`    1. amazon-bedrock   ${
+        detection.aws.hasCredentials ? "(detected, default)" : ""
+      }\n`);
+      process.stdout.write("    2. other            record your own provider setup\n");
+      const selected = promptChoice(
+        "  Provider",
+        2,
+        detection.aws.hasCredentials ? 1 : 2,
+      );
+      choices.provider = selected === 1 ? "amazon-bedrock" : "other";
+      if (choices.provider === "amazon-bedrock") {
+        choices.region = promptTextDefault("  AWS region", choices.region);
+        const profile = promptTextDefault(
+          "  AWS profile",
+          choices.profile || "default credential chain",
+        );
+        choices.profile = profile === "default credential chain" ? "" : profile;
+        process.stdout.write(
+          `  Using amazon-bedrock in ${choices.region} with ${
+            choices.profile || "the default credential chain"
+          }.\n\n`,
+        );
+      } else {
+        process.stdout.write("  Using other provider setup.\n\n");
+      }
+      return;
+    }
+    if (step === 3) {
+      process.stdout.write("  Step 3 of 6 - Model effort preset\n");
+      process.stdout.write("    1. balanced    reviewing at medium effort - the shipped default\n");
+      process.stdout.write("    2. thorough    reviewing at xhigh effort - deepest review, ~9x slower\n");
+      process.stdout.write("    3. minimal     lightest touch - review medium, write-ups at low effort\n");
+      const selected = promptChoice(
+        "  Preset",
+        3,
+        choices.preset === "balanced" ? 1 : choices.preset === "thorough" ? 2 : 3,
+      );
+      choices.preset = selected === 1 ? "balanced" : selected === 2 ? "thorough" : "minimal";
+      process.stdout.write(`  Using the ${choices.preset} preset.\n\n`);
+      return;
+    }
+    if (step === 4) {
+      process.stdout.write("  Step 4 of 6 - Plugins\n");
+      process.stdout.write("    1. all installed   (default)\n");
+      process.stdout.write("    2. none optional   core AI-DLC only\n");
+      process.stdout.write("    3. choose          comma-separated installed names\n");
+      const selected = promptChoice("  Plugins", 3, 1);
+      if (selected === 1) {
+        choices.plugins = "all";
+        choices.pluginLabel = "all installed";
+      } else if (selected === 2) {
+        choices.plugins = "aidlc";
+        choices.pluginLabel = "none optional";
+      } else {
+        choices.plugins = promptTextDefault("  Plugin names", "aidlc");
+        choices.pluginLabel = choices.plugins;
+      }
+      process.stdout.write(`  Using ${choices.pluginLabel} plugins.\n\n`);
+      return;
+    }
+    if (step === 5) {
+      process.stdout.write("  Step 5 of 6 - MCP servers\n");
+      process.stdout.write("    1. on\n    2. off\n");
+      const selected = promptChoice(
+        "  MCP",
+        2,
+        choices.mcp === "defaults" ? 1 : 2,
+      );
+      choices.mcp = selected === 1 ? "defaults" : "none";
+      process.stdout.write(`  MCP servers ${selected === 1 ? "on" : "off"}.\n\n`);
+      return;
+    }
+    process.stdout.write("  Step 6 of 6 - Where to record these choices\n");
+    process.stdout.write("    1. this project, committed     aidlc.settings.json - shared with your team  (default)\n");
+    process.stdout.write("    2. this project, just for you  aidlc.settings.local.json - gitignored\n");
+    process.stdout.write("    3. this machine                every project you set up here\n");
+    const selected = promptChoice(
+      "  Record in",
+      3,
+      choices.target === "project" ? 1 : choices.target === "local" ? 2 : 3,
+    );
+    choices.target = selected === 1 ? "project" : selected === 2 ? "local" : "global";
+    process.stdout.write(`  Recording choices in ${firstRunSettingsTargetLabel(choices.target)}.\n\n`);
+  };
+
+  process.stdout.write("\n  Customize setup - 6 steps, Enter accepts the [default].\n\n");
+  for (let step = 1; step <= 6; step++) editStep(step);
+  while (true) {
+    process.stdout.write("  Your choices - Enter to apply, or a number to change:\n");
+    process.stdout.write(`    1. Harness      ${choices.candidate.descriptor.productName}\n`);
+    process.stdout.write(`    2. Provider     ${
+      choices.provider === "amazon-bedrock"
+        ? `amazon-bedrock, ${choices.region}, ${choices.profile || "default credential chain"}`
+        : "other"
+    }\n`);
+    process.stdout.write(`    3. Preset       ${choices.preset}\n`);
+    process.stdout.write(`    4. Plugins      ${choices.pluginLabel}\n`);
+    process.stdout.write(`    5. MCP          ${choices.mcp === "defaults" ? "on" : "off"}\n`);
+    process.stdout.write(`    6. Record in    ${firstRunSettingsTargetLabel(choices.target)}\n`);
+    const value = firstRunPromptValue(prompt("  Apply? [Y/n]:")).toLowerCase();
+    if (!value || value === "y" || value === "yes") return choices;
+    if (value === "n" || value === "no") {
+      process.stdout.write("\n  Nothing written.\n");
+      return null;
+    }
+    if (/^[1-6]$/.test(value)) {
+      process.stdout.write("\n");
+      editStep(Number(value));
+      continue;
+    }
+    process.stdout.write("\n  Enter y, n, or a step number from 1 to 6.\n\n");
+  }
+}
+
+async function runFirstRunWizard(projectDir: string): Promise<boolean> {
+  try {
+  const candidates = installedSourceCandidates();
+  if (candidates.length === 0) return false;
+  const detection = detectFirstRun(projectDir, candidates);
+  const detected = detectedCandidateChoices(candidates, detection);
+  let candidate: InstalledSourceCandidate;
+  if (detected.length === 1) {
+    candidate = detected[0];
+  } else if (detected.length > 1) {
+    process.stdout.write("\n  Choose the harness for this project first.\n\n");
+    candidate = chooseHarness(candidates, detection, detected[0].stamp.distribution);
+  } else {
+    process.stdout.write("\n  No supported harness CLI was detected. Choose one to configure:\n\n");
+    candidate = chooseHarness(candidates, detection);
+  }
+  const aws = awsSummary(detection.aws);
+  const runtimeCount = detection.runtimeIssues.length;
+  process.stdout.write("\n  AI-DLC setup - first run in this project.\n\n");
+  process.stdout.write("  Checked your machine and this repo:\n\n");
+  const harnessDetection = detection.harnesses[candidate.stamp.distribution];
+  process.stdout.write(
+    `    Harness    ${candidate.descriptor.productName} ${
+      harnessDetection?.found ? "detected" : "selected"
+    }${harnessDetection?.version ? `  (${harnessDetection.version} on your PATH)` : ""}\n`,
+  );
+  process.stdout.write(
+    `    Project    ${
+      existsSync(join(projectDir, ".git")) ? "git repo" : "project directory"
+    }, no AI-DLC files yet\n`,
+  );
+  process.stdout.write(
+    `    AWS        ${
+      detection.aws.hasCredentials
+        ? `credentials found  (${aws.source}, region ${aws.region})`
+        : "credentials not found"
+    }\n`,
+  );
+  process.stdout.write(
+    `    Runtime    ${
+      runtimeCount === 0
+        ? "ready"
+        : `${runtimeCount === 1 ? "one" : runtimeCount} PATH fix${
+            runtimeCount === 1 ? "" : "es"
+          } needed - shown at the end`
+    }\n\n`,
+  );
+  process.stdout.write(
+    `  Set up AI-DLC for ${candidate.descriptor.productName} with recommended defaults?\n\n`,
+  );
+  process.stdout.write(
+    `    1. Yes, use recommended defaults   ${
+      candidate.stamp.distribution === "claude" ? "MCP servers on, " : ""
+    }all plugins, Bedrock via your AWS credentials\n`,
+  );
+  process.stdout.write(
+    "    2. No, customize step by step      harness, provider, preset, plugins, MCP, record layer\n",
+  );
+  process.stdout.write("    3. Exit, nothing written\n\n");
+  const selected = promptChoice("  Choice", 3, 1);
+  if (selected === 3) {
+    process.stdout.write("\n  Nothing written.\n");
+    return true;
+  }
+  let choices: FirstRunChoices | null;
+  if (selected === 1) {
+    choices = {
+      candidate,
+      provider: "amazon-bedrock",
+      region: aws.region,
+      profile: "",
+      preset: "balanced",
+      plugins: "all",
+      pluginLabel: "all installed",
+      mcp: candidate.stamp.distribution === "claude" ? "defaults" : "none",
+      target: "project",
+      providerVerified: detection.bedrockReachable === true,
+    };
+  } else {
+    choices = customizeFirstRun(candidate, candidates, detection);
+  }
+  if (!choices) return true;
+  try {
+    applyFirstRunChoices(projectDir, choices);
+    renderFirstRunEnding(projectDir, choices);
+  } catch (error) {
+    process.stdout.write(
+      `\n  Setup stopped: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    process.stdout.write("  Some project files may already have been written.\n");
+    process.exitCode = EXIT.failure;
+  }
+  return true;
+  } catch (error) {
+    if (error instanceof FirstRunCancelled) {
+      process.stdout.write("\n  Nothing written.\n");
+      return true;
+    }
+    throw error;
+  }
 }
 
 function existingProject(projectDir: string, requested?: string): {
@@ -3950,7 +4624,7 @@ function prepareModelsSection(
   );
   const next = modelPolicyForHarness(nextResolved.models, harness);
   if (!argv.includes("--dry-run") && !options.yes) {
-    if (!process.stdin.isTTY) {
+    if (!configInputIsTty()) {
       emitResult(
         usage(
           "non-interactive model policy mutation requires --yes; --yes confirms the selected policy but never chooses one",
@@ -4291,8 +4965,28 @@ export async function main(
     Boolean(process.env.KIRO_PROJECT_DIR);
   const recognized = [".git", "package.json", "Cargo.toml", "go.mod", "pyproject.toml"]
     .some((entry) => existsSync(join(projectDir, entry)));
+  const firstRunWizard = !section &&
+    configInputIsTty() &&
+    options.mode === "human" &&
+    discoverProjectHarnesses(projectDir).length === 0 &&
+    !argv.some((token) =>
+      [
+        "--dry-run",
+        "--force",
+        "--from",
+        "--harness",
+        "--json",
+        "--mcp",
+        "--pin",
+        "--plan-token",
+        "--quiet",
+        "--unpin",
+        "--yes",
+      ].includes(token)
+    );
+  if (firstRunWizard && await runFirstRunWizard(projectDir)) return;
   if (!recognized && !explicitProject && !options.yes) {
-    if (!process.stdin.isTTY) {
+    if (!configInputIsTty()) {
       emitResult(usage("non-interactive config outside a recognized project requires --project-dir"), options);
       return;
     }
@@ -4372,13 +5066,15 @@ export async function main(
     ) as "defaults" | "none" | undefined;
     if (
       !mcpMode &&
-      process.stdin.isTTY &&
+      configInputIsTty() &&
       descriptor.rootIntegrations.some((integration) =>
         integration.policy === "json-map" && integration.optional
       )
     ) {
-      const answer = prompt("Configure optional AI-DLC MCP servers? [y/N]:");
-      mcpMode = answer && /^y(?:es)?$/i.test(answer.trim()) ? "defaults" : "none";
+      process.stdout.write("\n  MCP servers\n    1. on\n    2. off\n");
+      const answer = promptChoice("  MCP", 2, 2);
+      mcpMode = answer === 1 ? "defaults" : "none";
+      process.stdout.write(`  MCP servers ${answer === 1 ? "on" : "off"}.\n\n`);
     }
     mcpMode ??= "none";
     const operations: TransactionOperation[] = [];
