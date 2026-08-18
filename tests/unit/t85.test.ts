@@ -21,7 +21,7 @@
 //       affirmed (informational)").
 //   - within PRACTICES_STALENESS_DAYS (90, aidlc-utility.ts:321) -> pass=true,
 //       "affirmed N day(s) ago" with NO "advisory".
-//   - beyond 90 days -> pass=true, "affirmed N days ago (advisory — > 90
+//   - beyond 90 days -> pass=true, "affirmed N days ago (advisory: > 90
 //       days; consider re-running practices-discovery)".
 //   - unparseable ISO -> pass=FALSE, "timestamp unreadable" + the bad value
 //       echoed in the fix clause. This is the ONLY failing check the .sh

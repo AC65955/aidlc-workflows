@@ -1715,7 +1715,7 @@ export async function collectDoctorReport(
       // verified, so say so rather than silently checking nothing).
       results.push({
         pass: false,
-        label: "Hook contract: settings.json unreadable — cannot verify wired hooks",
+        label: "Hook contract: settings.json unreadable - cannot verify wired hooks",
         fix: "restore .claude/settings.json (copy from `dist/claude/.claude/settings.json`)",
       });
     } else if (expectedHooks.length === 0) {
@@ -1863,7 +1863,7 @@ export async function collectDoctorReport(
         results.push({
           pass: true,
           label:
-            "~/.copilot/config.json absent — fine for VS Code-only installs; for the CLI, one interactive run records folder trust (hooks silently no-op untrusted)",
+            "~/.copilot/config.json absent (fine for VS Code-only installs; for the CLI, one interactive run records folder trust - hooks silently no-op untrusted)",
         });
       } else {
         const raw = readFileSync(configPath, "utf-8");
@@ -1900,7 +1900,7 @@ export async function collectDoctorReport(
     results.push({
       pass: true,
       label:
-        "headless runs: set GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS=1 for `copilot -p` sessions — repo hooks are off by default in prompt mode",
+        "headless runs: set GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS=1 for `copilot -p` sessions - repo hooks are off by default in prompt mode",
     });
   } else if (harness === ".cursor") {
     // Cursor: hooks.json (the hook wiring), cli.json (permissions), and the
@@ -1958,7 +1958,7 @@ export async function collectDoctorReport(
   ) {
     results.push({
       pass: true,
-      label: `Multi-harness install detected (${harness} + ${otherTrees.join(" + ")}) with an active workflow — supported but untested; keep all trees at the same framework version`,
+      label: `Multi-harness install detected (${harness} + ${otherTrees.join(" + ")}) with an active workflow - supported but untested; keep all trees at the same framework version`,
     });
   }
 
@@ -1970,7 +1970,7 @@ export async function collectDoctorReport(
   if (envScope === "") {
     results.push({
       pass: true,
-      label: "AWS_AIDLC_DEFAULT_SCOPE (unset — no project default)",
+      label: "AWS_AIDLC_DEFAULT_SCOPE (unset - no project default)",
     });
   } else if (validScopes().has(envScope)) {
     results.push({
@@ -2254,7 +2254,7 @@ export async function collectDoctorReport(
     results.push({
       pass: false,
       label: "Hook heartbeat data",
-      fix: "health dir exists but no hooks have fired — verify hooks are registered in settings.json",
+      fix: "health dir exists but no hooks have fired - verify hooks are registered in settings.json",
     });
   }
 
@@ -2376,7 +2376,7 @@ export async function collectDoctorReport(
       for (const leak of leaks) {
         results.push({
           pass: false,
-          label: `Leaked audit lock on bucket "${leak.bucket}" (${leak.reason}${leak.ownerPid !== null ? `, pid ${leak.ownerPid}` : ""}) — cleared`,
+          label: `Leaked audit lock on bucket "${leak.bucket}" (${leak.reason}${leak.ownerPid !== null ? `, pid ${leak.ownerPid}` : ""}) - cleared`,
           fix: "the stale lock was cleared automatically; re-run your /aidlc command",
         });
       }
@@ -2823,7 +2823,7 @@ export async function collectDoctorReport(
         label = `Orphan audit: 0 (${reconciled} reconciled)`;
       }
       if (unknownReasonCount > 0) {
-        label += `; ${unknownReasonCount} PRACTICES_OVERRIDE row(s) with unknown Reason — track for follow-up`;
+        label += `; ${unknownReasonCount} PRACTICES_OVERRIDE row(s) with unknown Reason - track for follow-up`;
       }
       results.push({ pass: true, label });
     } else {
@@ -2889,7 +2889,7 @@ export async function collectDoctorReport(
           } else {
             results.push({
               pass: true,
-              label: `Practices staleness: affirmed ${ageDays} days ago (advisory — > ${PRACTICES_STALENESS_DAYS} days; consider re-running practices-discovery)`,
+              label: `Practices staleness: affirmed ${ageDays} days ago (advisory: > ${PRACTICES_STALENESS_DAYS} days; consider re-running practices-discovery)`,
             });
           }
         }
@@ -2982,7 +2982,7 @@ export async function collectDoctorReport(
         ? "Cycle detection: 0 cycles"
         : `Cycle detection: ${cycles.length} cycle(s) found`,
       fix: cycles.length > 0
-        ? `cycles: ${cycles.map((c) => c.join(" → ")).join("; ")}`
+        ? `cycles: ${cycles.map((c) => c.join(" -> ")).join("; ")}`
         : undefined,
     });
   } catch (e) {
@@ -3238,7 +3238,7 @@ export async function collectDoctorReport(
         });
       } else {
         const detail = drifts
-          .map((d) => `${d.file} ## ${d.heading} ⇄ org "${d.orgSentence}"`)
+          .map((d) => `${d.file} ## ${d.heading} <-> org "${d.orgSentence}"`)
           .join("; ");
         results.push({
           pass: true,
@@ -3314,7 +3314,7 @@ export async function collectDoctorReport(
     }
     if (unpaired.length > 0) {
       const unpairedDetail = unpaired
-        .map((u) => `unpaired: ${u.file} → ${u.sensor} (no stage binds it)`)
+        .map((u) => `unpaired: ${u.file} -> ${u.sensor} (no stage binds it)`)
         .join("; ");
       coverageLabel = `${coverageLabel}; ${unpairedDetail}`;
     }
@@ -3349,7 +3349,7 @@ export async function collectDoctorReport(
     for (const sp of listSpaces(projectDir)) {
       for (const i of listIntents(projectDir, sp.name)) {
         if (i.uuid !== "" && i.dirName === null) {
-          danglingRows.push(`${sp.name}/${i.slug} (uuid ${i.uuid.slice(0, 8)}…)`);
+          danglingRows.push(`${sp.name}/${i.slug} (uuid ${i.uuid.slice(0, 8)}...)`);
         } else if (i.uuid === "" && i.status === "unknown") {
           orphanDirs.push(`${sp.name}/${i.dirName}`);
         }
@@ -3357,7 +3357,7 @@ export async function collectDoctorReport(
     }
     const total = danglingRows.length + orphanDirs.length;
     if (total === 0) {
-      results.push({ pass: true, label: "Intent registry: all rows ⇄ record dirs reconciled" });
+      results.push({ pass: true, label: "Intent registry: all rows match their record dirs" });
     } else {
       const detail = [
         danglingRows.length > 0 ? `${danglingRows.length} row(s) with a missing dir [${danglingRows.join(", ")}]` : "",
@@ -3365,7 +3365,7 @@ export async function collectDoctorReport(
       ].filter(Boolean).join("; ");
       results.push({
         pass: true,
-        label: `Intent registry: ${total} record-dir mismatch (advisory — likely a hand-renamed intent dir): ${detail}. Fix: set the row's \`dirName\` in the space's intents.json to the on-disk dir name, or rename the dir back.`,
+        label: `Intent registry: ${total} record-dir mismatch (advisory - likely a hand-renamed intent dir): ${detail}. Fix: set the row's \`dirName\` in the space's intents.json to the on-disk dir name, or rename the dir back.`,
       });
     }
   } catch (e) {

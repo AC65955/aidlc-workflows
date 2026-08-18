@@ -31,13 +31,13 @@
 // needing = M-X, P = rules whose pairing sensor id (aidlc- stripped) resolves
 // in the seed graph's sensors_applicable set. needing==0 -> the
 // "no sensor-bound rules" label. Unpaired rules (named sensor absent
-// everywhere) append "unpaired: <path> → <sensor> (no stage binds it)".
+// everywhere) append "unpaired: <path> -> <sensor> (no stage binds it)".
 //
 // EQUAL-OR-STRONGER PARITY (every .sh `ok`/`assert` maps to an expect()):
 //   - .sh case 1 assert_contains "Paired sensor coverage: 1/2 guardrails
 //       paired (1 feedforward-only)"            -> test 1 (same substring).
 //   - .sh case 2 assert_contains
-//       "unpaired: .claude/rules/aidlc-team.md → aidlc-ghost (no stage binds
+//       "unpaired: .claude/rules/aidlc-team.md -> aidlc-ghost (no stage binds
 //       it)"                                    -> test 2 (same substring).
 //   - .sh case 3 COV_LINE grep "^✓" on the coverage line -> test 3: the
 //       coverage line is prefixed "ok" (advisory pass), asserted by isolating
@@ -289,7 +289,7 @@ describe("t105 doctor paired-coverage + GUARDRAIL_LOADED (migrated from t105-doc
     // aidlc/spaces/default/memory/), so the unpaired detail names the team
     // layer by its neutral path.
     expect(r.out).toContain(
-      "unpaired: aidlc/spaces/default/memory/team.md → aidlc-ghost (no stage binds it)",
+      "unpaired: aidlc/spaces/default/memory/team.md -> aidlc-ghost (no stage binds it)",
     );
   });
 

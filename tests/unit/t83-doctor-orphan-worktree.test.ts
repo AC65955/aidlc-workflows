@@ -39,7 +39,7 @@
 //     - sub-case (a)            → "... AUDIT_FORKED-without-disk: <slug>" (:876)
 //     - sub-case (b)            → "... orphan-delta (no AUDIT_MERGED): <slug>" (:877)
 //     - PRACTICES_OVERRIDE      → "... without follow-up PRACTICES_AFFIRMED" (:878)
-//     - unknown Reason          → "... unknown Reason — track for follow-up" (:871)
+//     - unknown Reason          → "... unknown Reason - track for follow-up" (:871)
 //   Check 6 — MERGE_DISPATCH advisory (:948-1014)
 //     - orphan INVOKED          → "MERGE_DISPATCH: N orphan INVOKED (advisory ...)" (:1013)
 //
