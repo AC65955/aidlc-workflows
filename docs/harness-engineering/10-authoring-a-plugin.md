@@ -298,7 +298,7 @@ console.log(JSON.stringify({
   checks: [{
     pass: existsSync(join(root, "tools", "my-plugin-helper.ts")),
     label: "my-plugin helper installed",
-    fix: "Run `aidlc plugin sync` or re-run hooks/compose.ts.",
+    fix: "Run `bun <harness-dir>/tools/aidlc-utility.ts plugin sync` or re-run hooks/compose.ts.",
     severity: "error",
   }],
 }));
