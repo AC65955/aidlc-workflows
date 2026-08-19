@@ -1,3 +1,11 @@
+import {
+  colorEnabled,
+  configureColor,
+  errorLabel,
+  fixLabel,
+  heading,
+} from "./aidlc-color.ts";
+
 export const ROUTE_NAMESPACE_DECLARATIONS = {
   public: { trustedPrefix: false },
   engine: { trustedPrefix: true },
@@ -366,9 +374,10 @@ export type GlobalOptions = {
 };
 
 export function globalOptions(argv: readonly string[]): GlobalOptions {
+  configureColor(argv);
   return {
     mode: argv.includes("--json") ? "json" : argv.includes("--quiet") ? "quiet" : "human",
-    color: !argv.includes("--no-color") && !process.env.NO_COLOR,
+    color: colorEnabled(process.stdout),
     yes: argv.includes("--yes"),
     offline: argv.includes("--offline") || process.env.AIDLC_OFFLINE === "1",
     verbose: argv.includes("--verbose"),
@@ -403,14 +412,20 @@ export function emitResult(result: CommandResult, options: GlobalOptions): void 
     } else if (result.code === EXIT.actionNeeded) {
       process.stdout.write(`action: ${result.message}\n`);
     } else {
-      process.stdout.write(`error: ${result.message}\n`);
+      process.stdout.write(`${errorLabel("error:", process.stdout)} ${result.message}\n`);
     }
     if (result.remediation) {
       process.stdout.write(
-        `${result.status === "usage" ? "usage" : "fix"}: ${result.remediation}\n`,
+        `${
+          result.status === "usage"
+            ? heading("usage:", process.stdout)
+            : fixLabel("fix:", process.stdout)
+        } ${result.remediation}\n`,
       );
     } else if (result.status === "usage") {
-      process.stdout.write("usage: rerun with --help for valid usage\n");
+      process.stdout.write(
+        `${heading("usage:", process.stdout)} rerun with --help for valid usage\n`,
+      );
     }
   }
   process.exitCode = result.code;

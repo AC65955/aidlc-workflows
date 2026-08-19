@@ -932,6 +932,7 @@ describe("mechanismsOf is body-derived (milestone 3)", () => {
     "unit/t298-settings-hierarchy.test.ts",
     "unit/t299-first-run-wizard.test.ts",
     "unit/t300-round18-acceptance-fixes.test.ts",
+    "unit/t301-public-cli-color.test.ts",
     "unit/t255-workspace-sync.test.ts",
     "unit/t27.test.ts",
     "unit/t29.test.ts",

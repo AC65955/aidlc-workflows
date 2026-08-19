@@ -58,6 +58,26 @@ diagnostic and lifecycle routes.
 
 ---
 
+## Terminal Color
+
+The six public terminal commands (`config`, `doctor`, `version`, `update`,
+`use`, and `uninstall`) use restrained color only on human output. JSON, quiet
+output, files, audit records, and non-TTY streams remain uncolored.
+
+Color selection uses this precedence:
+
+1. `--no-color` disables color.
+2. A set `NO_COLOR` environment variable disables color, regardless of value.
+3. A non-empty `FORCE_COLOR` value other than `0` enables color.
+4. Otherwise, color is enabled only for a TTY stream when `TERM` is not `dumb`.
+
+The decision is made independently for stdout and stderr. Use `--no-color` for
+one command, `NO_COLOR=1` for a shell or process environment, and
+`FORCE_COLOR=1` when a terminal wrapper supports ANSI color but does not expose
+TTY detection.
+
+---
+
 ## Command Decision Tree
 
 ```mermaid

@@ -299,7 +299,7 @@
       "sha256:4a9bdeec2792023cd4444bcc7739d4e6a2aa799768766ee7ce2915ca2a5582a9"
     ],
     ".aidlc/tools/aidlc-command.ts": [
-      "sha256:ef85716a1eb1c801985f2883c6ee1754967ce7c9f986bf4c342bdde323d59bb1"
+      "sha256:d6838d188999a5c394c1349e3cbc473b2843449aa85626317f960d2db750ffdb"
     ],
     ".aidlc/tools/aidlc-runtime-paths.ts": [
       "sha256:27f6e9c3623142cf0585fe9b46e49cf49d449c5a0aac8d94b4d3b97499b3752d"
@@ -317,7 +317,7 @@
       "sha256:cf18036fcc59dfea71428d87a02e8c92f9713c57fb2916cd65f566d3b743f98e"
     ],
     ".opencode/plugin/aidlc-opencode-adapter.ts": [
-      "sha256:833fc33b133e7695bd128319067836f45a015bbdbfecb80b2386c92c19f86993"
+      "sha256:cc4054cdc5317dca4e330930768db600053f5469062887f9f931e2b197c194d1"
     ]
   }
 }

@@ -27,6 +27,15 @@ import {
   valuesAfter,
 } from "./aidlc-command.ts";
 import {
+  cmd,
+  dim,
+  errorLabel,
+  heading,
+  success as successText,
+  tipLabel,
+  warnVerdict,
+} from "./aidlc-color.ts";
+import {
   type ProjectionDescriptor,
   projectionFiles,
   sha256Bytes,
@@ -453,16 +462,17 @@ function validateModelsArgs(argv: readonly string[]): string | null {
 
 function modelPolicyHelp(): string {
   const invoke = aidlcInvocation();
+  const out = process.stdout;
   return [
     "Choose model and effort policy for each agent",
     "",
-    "USAGE",
-    `  ${invoke} config models [flags]`,
+    heading("USAGE", out),
+    `  ${cmd(`${invoke} config models [flags]`, out)}`,
     "",
     "Pins bind in both directions: a pinned agent stays pinned if the session later moves to a larger model.",
     "Judgment and Writing up inherit by default; the balanced reviewer baseline is the disclosed shipped step-down.",
     "",
-    "POLICY",
+    heading("POLICY", out),
     "  --preset <thorough|balanced|minimal>",
     "    balanced explicitly matches the shipped reviewing default",
     "  --from <preset|profile> [--save-as <name>]",
@@ -472,24 +482,24 @@ function modelPolicyHelp(): string {
     "  --agent <name> --effort <value> [--model <raw-id>]",
     "  --reset",
     "",
-    "WRITE TARGET",
+    heading("WRITE TARGET", out),
     "  --project  committed team policy (recommended in a repository)",
     "  --local    personal project policy in aidlc.settings.local.json",
     "  --global   machine policy in the install-root aidlc.settings.json",
     "Outside an installed project, --global is the only valid target and is inferred.",
     "",
-    "INSPECTION",
+    heading("INSPECTION", out),
     "  --show [--json]",
     "  --check",
     "",
-    "MUTATION CONTROL",
+    heading("MUTATION CONTROL", out),
     "  --dry-run",
     "  --yes",
     "",
-    "EXAMPLE",
-    `  ${invoke} config models --preset thorough --project --yes`,
+    heading("EXAMPLE", out),
+    `  ${cmd(`${invoke} config models --preset thorough --project --yes`, out)}`,
     "",
-    `Run '${invoke} config models --show' to inspect the effective result.`,
+    dim(`Run '${invoke} config models --show' to inspect the effective result.`, out),
   ].join("\n");
 }
 
@@ -558,7 +568,8 @@ function showModels(
     emitResult(success(`model policy for ${harness}`, data), options);
     return;
   }
-  let output = `Model policy for ${harness}\n\n`;
+  const out = process.stdout;
+  let output = `${heading(`Model policy for ${harness}`, out)}\n\n`;
   output += `Preset: ${policy?.preset ?? "none (shipped defaults)"}\n\n`;
   output += `All ${data.effective.length} agents inherit your session model and effort, except:\n`;
   const grouped = new Map<string, typeof data.effective>();
@@ -590,7 +601,9 @@ function showModels(
         "    Review-only agents use the measured medium baseline. At xhigh, measured review wall-clock is roughly 9x medium (#612 data).\n";
     }
     if (item.layer === "agent-exception" || item.layer === "group-dial") {
-      output += `    Recorded override: ${item.layer}; model ${item.modelSource}, effort ${item.effortSource}.\n`;
+      output += `    Recorded override: ${dim(item.layer, out)}; model ${
+        dim(item.modelSource, out)
+      }, effort ${dim(item.effortSource, out)}.\n`;
     }
     if (item.unexpressed.length > 0) {
       output += `    Not expressible on ${harness}: ${item.unexpressed.join(", ")}.\n`;
@@ -614,7 +627,10 @@ function showModels(
       ? displayedRecorded.join(", ")
       : `nothing yet - run '${aidlcInvocation()} config models --preset balanced --project --yes'`
   }\n`;
-  output += `Full per-agent list: ${aidlcInvocation()} config models --show --json\n`;
+  output += `${dim(
+    `Full per-agent list: ${aidlcInvocation()} config models --show --json`,
+    out,
+  )}\n`;
   process.stdout.write(output);
   process.exitCode = EXIT.ok;
 }
@@ -915,19 +931,20 @@ function validateDiagnosticArgs(
 
 function diagnosticHelp(section: DiagnosticSection): string {
   const invoke = aidlcInvocation();
+  const out = process.stdout;
   const common = [
-    "Inspection:",
+    heading("Inspection:", out),
     "  --show [--json]",
     "  --check",
     "",
-    "Mutation control:",
+    heading("Mutation control:", out),
     "  --reset",
     "  --dry-run",
     "  --yes",
   ];
   const specific = section === "runtime"
     ? [
-        "Runtime answers:",
+        heading("Runtime answers:", out),
         "  --record-paths",
         "",
         "The probe uses the non-interactive hook PATH, not interactive shell rc files.",
@@ -935,7 +952,7 @@ function diagnosticHelp(section: DiagnosticSection): string {
       ]
     : section === "providers"
     ? [
-        "Provider answers:",
+        heading("Provider answers:", out),
         "  --provider <amazon-bedrock|other>",
         "  --region <aws-region>",
         "  --profile <aws-profile>",
@@ -946,7 +963,7 @@ function diagnosticHelp(section: DiagnosticSection): string {
         "Credential detection is offline only. No provider or model endpoint is contacted.",
       ]
     : [
-        "Trust answers:",
+        heading("Trust answers:", out),
         "  --acknowledge",
         "",
         "Trust is read, verified, and instructed. This section never regenerates trust seeds or permission rules.",
@@ -958,17 +975,20 @@ function diagnosticHelp(section: DiagnosticSection): string {
       ? "Record model-provider choices and pending manual actions"
       : "Review host trust and command allowlists",
     "",
-    "USAGE",
-    `  ${invoke} config ${section} [flags]`,
+    heading("USAGE", out),
+    `  ${cmd(`${invoke} config ${section} [flags]`, out)}`,
     "",
     ...specific,
     "",
     ...common,
     "",
-    "EXAMPLE",
-    `  ${invoke} config ${section} --show`,
+    heading("EXAMPLE", out),
+    `  ${cmd(`${invoke} config ${section} --show`, out)}`,
     "",
-    `Run '${invoke} config ${section} --check' for a non-writing verification.`,
+    dim(
+      `Run '${invoke} config ${section} --check' for a non-writing verification.`,
+      out,
+    ),
   ].join("\n");
 }
 
@@ -1675,8 +1695,11 @@ function renderSetupMap(rows: readonly SetupMapRow[]): SetupWalkSection[] {
   );
   for (const row of rows) {
     const state = row.needs ? "[needs]" : "[ok]";
+    const renderedState = row.needs
+      ? warnVerdict(state.padEnd(7), process.stdout)
+      : state.padEnd(7);
     process.stdout.write(
-      `    ${state.padEnd(7)}  ${row.label.padEnd(11)} ${row.detail}\n`,
+      `    ${renderedState}  ${row.label.padEnd(11)} ${row.detail}\n`,
     );
   }
   const order: SetupWalkSection[] = ["runtime", "providers", "trust"];
@@ -1976,9 +1999,10 @@ function validateChoiceArgs(
 
 function choiceHelp(section: ChoiceSection): string {
   const invoke = aidlcInvocation();
+  const out = process.stdout;
   const specific = section === "flags"
     ? [
-        "Recorded flags:",
+        heading("Recorded flags:", out),
         "  --default-scope <installed-scope>",
         "  --swarm <on|off>",
         "  --hook-debug <on|off>",
@@ -1989,14 +2013,14 @@ function choiceHelp(section: ChoiceSection): string {
         "Environment variables always override recorded answers.",
         "Bypasses weaken deterministic guards and are accepted only through explicit --bypass flags.",
         "",
-        "Write target (required for mutations):",
+        heading("Write target (required for mutations):", out),
         "  --project  committed team policy (recommended in a repository)",
         "  --local    personal project policy in aidlc.settings.local.json",
         "  --global   machine policy in the install-root aidlc.settings.json",
         "Outside an installed project, --global is the only valid target and is inferred.",
       ]
     : [
-        "Project choices:",
+        heading("Project choices:", out),
         "  --plugins <comma-separated-installed-names|all>",
         "  --mcp <defaults|none>",
         "  --completions <bash|zsh|fish|powershell|none>",
@@ -2008,24 +2032,27 @@ function choiceHelp(section: ChoiceSection): string {
       ? "Record project defaults and explicit guard bypasses"
       : "Choose plugins, MCP servers, and shell completions",
     "",
-    "USAGE",
-    `  ${invoke} config ${section} [flags]`,
+    heading("USAGE", out),
+    `  ${cmd(`${invoke} config ${section} [flags]`, out)}`,
     "",
     ...specific,
     "",
-    "INSPECTION",
+    heading("INSPECTION", out),
     "  --show [--json]",
     "  --check",
     "",
-    "MUTATION CONTROL",
+    heading("MUTATION CONTROL", out),
     "  --reset",
     "  --dry-run",
     "  --yes",
     "",
-    "EXAMPLE",
-    `  ${invoke} config ${section} --show`,
+    heading("EXAMPLE", out),
+    `  ${cmd(`${invoke} config ${section} --show`, out)}`,
     "",
-    `Run '${invoke} config ${section} --check' for a non-writing verification.`,
+    dim(
+      `Run '${invoke} config ${section} --check' for a non-writing verification.`,
+      out,
+    ),
   ].join("\n");
 }
 
@@ -2262,10 +2289,16 @@ function showChoiceSection(
     emitResult(success(`${section} configuration for ${selected.harness}`, data), options);
     return;
   }
-  let output = `${section[0].toUpperCase()}${section.slice(1)} configuration for ${selected.harness}\n`;
+  const out = process.stdout;
+  let output = `${heading(
+    `${section[0].toUpperCase()}${section.slice(1)} configuration for ${selected.harness}`,
+    out,
+  )}\n`;
   if (section === "flags") {
     const sources = data.sources as Record<string, string>;
     const effective = data.effective as Record<string, string | undefined>;
+    const sourceLabel = (name: string): string =>
+      dim(`[${sources[name]}]`, out);
     const effectiveBoolean = (
       envName: string,
       recorded: boolean | undefined,
@@ -2284,24 +2317,20 @@ function showChoiceSection(
       sources.AWS_AIDLC_DEFAULT_SCOPE === "env"
         ? effective.AWS_AIDLC_DEFAULT_SCOPE ?? "inherit"
         : resolved.flags?.defaultScope ?? "inherit"
-    } [${
-      sources.AWS_AIDLC_DEFAULT_SCOPE
-    }]\n`;
-    output += `  Swarm: ${effectiveBoolean("AIDLC_USE_SWARM", resolved.flags?.swarm)} [${
-      sources.AIDLC_USE_SWARM
-    }]\n`;
+    } ${sourceLabel("AWS_AIDLC_DEFAULT_SCOPE")}\n`;
+    output += `  Swarm: ${
+      effectiveBoolean("AIDLC_USE_SWARM", resolved.flags?.swarm)
+    } ${sourceLabel("AIDLC_USE_SWARM")}\n`;
     output += `  Hook debug: ${
       effectiveBoolean("AIDLC_HOOK_DEBUG", resolved.flags?.hookDebug)
-    } [${sources.AIDLC_HOOK_DEBUG}]\n`;
+    } ${sourceLabel("AIDLC_HOOK_DEBUG")}\n`;
     output += `  Sensor timeout: ${
       sources.AIDLC_SENSOR_TIMEOUT_MS === "env"
         ? effective.AIDLC_SENSOR_TIMEOUT_MS ?? "inherit"
         : resolved.flags?.sensorTimeoutMs ?? "inherit"
-    } [${
-      sources.AIDLC_SENSOR_TIMEOUT_MS
-    }]\n`;
+    } ${sourceLabel("AIDLC_SENSOR_TIMEOUT_MS")}\n`;
     for (const bypass of resolved.flags?.bypasses ?? []) {
-      output += `  Bypass enabled: ${bypass} [${sources[bypass]}]\n`;
+      output += `  Bypass enabled: ${bypass} ${sourceLabel(bypass)}\n`;
     }
     const files = data.files as ReturnType<typeof flagFiles>;
     if (files.length === 0) {
@@ -2309,7 +2338,7 @@ function showChoiceSection(
     } else {
       output += "  Files carrying flags:\n";
       for (const entry of files) {
-        output += `    ${entry.setting}: ${entry.file}\n`;
+        output += `    ${dim(entry.setting, out)}: ${entry.file}\n`;
       }
     }
     for (const issue of data.issues as ReturnType<typeof flagIssues>) {
@@ -2325,7 +2354,7 @@ function showChoiceSection(
     }
     output += "  Files carrying project choices:\n";
     for (const entry of data.files as ReturnType<typeof projectChoiceFiles>) {
-      output += `    ${entry.setting}: ${entry.file}\n`;
+      output += `    ${dim(entry.setting, out)}: ${entry.file}\n`;
     }
   }
   process.stdout.write(output);
@@ -3969,10 +3998,10 @@ function renderFirstRunEnding(
   )) as { files?: Record<string, string> };
   const count = Object.keys(manifest.files ?? {}).length;
   process.stdout.write(
-    `\n  Writing project files ... done  (${choices.candidate.descriptor.harnessDir}/ and aidlc/, ${count} files)\n`,
+    `\n  Writing project files ... ${successText("done", process.stdout)}  (${choices.candidate.descriptor.harnessDir}/ and aidlc/, ${count} files)\n`,
   );
   process.stdout.write(
-    `  Recording your choices ... done  (${
+    `  Recording your choices ... ${successText("done", process.stdout)}  (${
       choices.target === "project"
         ? "aidlc.settings.json in this project"
         : choices.target === "local"
@@ -5248,11 +5277,17 @@ export async function main(
           left.distance - right.distance ||
           left.candidate.localeCompare(right.candidate)
         )[0];
-      process.stderr.write(`error: unknown config section '${section.value}'\n`);
+      process.stderr.write(
+        `${errorLabel("error:", process.stderr)} unknown config section '${section.value}'\n`,
+      );
       if (nearest && nearest.distance <= 2) {
-        process.stderr.write(`\n  tip: did you mean '${nearest.candidate}'?\n`);
+        process.stderr.write(
+          `\n  ${tipLabel("tip:", process.stderr)} did you mean '${nearest.candidate}'?\n`,
+        );
       }
-      process.stderr.write(`\nusage: ${configCommand("<section> [flags]")}\n`);
+      process.stderr.write(
+        `\n${heading("usage:", process.stderr)} ${configCommand("<section> [flags]")}\n`,
+      );
       process.stderr.write(
         `For the full list, run '${configCommand("--help")}'.\n`,
       );

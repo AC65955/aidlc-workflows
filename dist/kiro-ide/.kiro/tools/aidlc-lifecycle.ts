@@ -35,6 +35,10 @@ import {
   valueAfter,
 } from "./aidlc-command.ts";
 import {
+  success as successText,
+  warnVerdict,
+} from "./aidlc-color.ts";
+import {
   projectionFiles,
   sha256File,
   walkFiles,
@@ -1659,10 +1663,16 @@ function humanLifecycleNarration(
       ? `\nPruned unprotected releases: ${pruned.join(", ")}.`
       : "";
     if (argv.includes("--dry-run")) {
-      return `Would update aidlc from ${before ?? "not installed"} to ${target}.`;
+      return warnVerdict(
+        `Would update aidlc from ${before ?? "not installed"} to ${target}.`,
+        process.stdout,
+      );
     }
     if (before === target) {
-      return `You're on the latest version of aidlc (${target}).${pruneLine}`;
+      return `${successText(
+        `You're on the latest version of aidlc (${target}).`,
+        process.stdout,
+      )}${pruneLine}`;
     }
     return [
       `Checking for releases ... ${before ?? "not installed"} -> ${target}`,
@@ -1672,18 +1682,24 @@ function humanLifecycleNarration(
       })`,
       ...(pruned.length > 0 ? [`Pruned unprotected releases: ${pruned.join(", ")}.`] : []),
       "",
-      `Updated aidlc from ${before ?? "not installed"} to ${target}.`,
+      successText(
+        `Updated aidlc from ${before ?? "not installed"} to ${target}.`,
+        process.stdout,
+      ),
       "Project files were not changed. Run 'aidlc config' between workflows to refresh them.",
     ].join("\n");
   }
   if (command === "use") {
     const target = (result.data as { version?: string } | undefined)?.version ?? argv[1];
     if (!target) return null;
-    return before === target
-      ? `Already using aidlc ${target}.`
-      : `Now using aidlc ${target} (was ${
-        before ?? "not installed"
-      }; retained locally, no project changes).`;
+    return successText(
+      before === target
+        ? `Already using aidlc ${target}.`
+        : `Now using aidlc ${target} (was ${
+            before ?? "not installed"
+          }; retained locally, no project changes).`,
+      process.stdout,
+    );
   }
   if (command === "uninstall") {
     const data = result.data as {
@@ -1691,9 +1707,12 @@ function humanLifecycleNarration(
       deferred?: boolean;
     } | undefined;
     if (data?.deferred) return null;
-    return data?.purge
-      ? "Removed aidlc, all retained releases, machine settings, update cache, pins, and harness default. Project files were kept."
-      : "Removed aidlc and all retained releases. Machine settings, update cache, pins, harness default, and project files were kept.";
+    return successText(
+      data?.purge
+        ? "Removed aidlc, all retained releases, machine settings, update cache, pins, and harness default. Project files were kept."
+        : "Removed aidlc and all retained releases. Machine settings, update cache, pins, harness default, and project files were kept.",
+      process.stdout,
+    );
   }
   return null;
 }

@@ -32,6 +32,16 @@ import {
   discoverProjectHarnesses,
 } from "./aidlc-runtime-paths.ts";
 import {
+  configureColor,
+  dim,
+  failVerdict,
+  fixLabel,
+  heading,
+  okVerdict,
+  success,
+  warnVerdict,
+} from "./aidlc-color.ts";
+import {
   isModelHarness,
   modelPolicyDoctorIssues,
 } from "./aidlc-model-policy.ts";
@@ -211,19 +221,30 @@ function humanReport(
   );
   const status = (check: DoctorCheck): "ok" | "warn" | "fail" =>
     check.severity === "warn" ? "warn" : check.pass ? "ok" : "fail";
+  const out = process.stdout;
+  const colorVerdict = (verdict: "ok" | "warn" | "fail"): string => {
+    const padded = verdict.padEnd(5);
+    return verdict === "warn"
+      ? warnVerdict(padded, out)
+      : verdict === "fail"
+      ? failVerdict(padded, out)
+      : okVerdict(padded, out);
+  };
   const invoke = aidlcInvocation();
   const fallbackFix =
     `run \`${invoke} doctor --verbose\`, correct the named condition, then rerun \`${invoke} doctor\``;
   const renderCheck = (check: DoctorCheck): string => {
     const verdict = status(check);
-    let row = `  ${verdict.padEnd(5)} ${check.label}\n`;
-    if (verdict !== "ok") row += `        fix: ${check.fix ?? fallbackFix}\n`;
+    let row = `  ${colorVerdict(verdict)} ${check.label}\n`;
+    if (verdict !== "ok") {
+      row += `        ${fixLabel("fix:", out)} ${check.fix ?? fallbackFix}\n`;
+    }
     return row;
   };
   const findings = analysis.findings.filter((finding) => finding.severity !== "info");
   const findingRows = findings.map((finding) =>
-    `  warn  [${finding.id}] ${finding.summary}\n` +
-    `        fix: ${finding.remedy ?? fallbackFix}\n`
+    `  ${warnVerdict("warn ", out)} [${finding.id}] ${finding.summary}\n` +
+    `        ${fixLabel("fix:", out)} ${finding.remedy ?? fallbackFix}\n`
   );
   const renderSection = (
     checks: readonly DoctorCheck[],
@@ -238,33 +259,38 @@ function humanReport(
     rows += extraAttentionRows.join("");
     if (passing.length > 0) {
       const allClean = attention.length === 0 && extraAttentionRows.length === 0;
-      rows += `  ok    ${allClean ? "all " : ""}${passing.length} checks passed\n`;
+      rows += `  ${okVerdict("ok   ", out)} ${allClean ? "all " : ""}${passing.length} checks passed\n`;
     }
     return rows;
   };
-  let output = "AI-DLC doctor\n\n";
-  output += "Machine\n";
+  let output = `${heading("AI-DLC doctor", out)}\n\n`;
+  output += `${heading("Machine", out)}\n`;
   output += renderSection(machine);
-  output += `\nProject${
+  output += `\n${heading(`Project${
     harness
       ? ` (${harness.harnessDir}, ${productNames[harness.distribution] ?? harness.distribution})`
       : ""
-  }\n`;
+  }`, out)}\n`;
   output += renderSection(project, findingRows);
-  output += "\nFramework integrity\n";
+  output += `\n${heading("Framework integrity", out)}\n`;
   output += renderSection(framework);
   const visibleWarnings = report.warnings + findings.length;
-  output += `\n${report.failed} problem${report.failed === 1 ? "" : "s"}, ${
-    visibleWarnings
-  } warning${visibleWarnings === 1 ? "" : "s"}.\n`;
+  const problems = `${report.failed} problem${report.failed === 1 ? "" : "s"}`;
+  const warnings = `${visibleWarnings} warning${visibleWarnings === 1 ? "" : "s"}`;
+  output += `\n${
+    report.failed > 0 ? failVerdict(problems, out) : problems
+  }, ${visibleWarnings > 0 ? warnVerdict(warnings, out) : warnings}.\n`;
   if (visibleWarnings > 0) {
     output += "Warnings are advisory - if everything works, ignore them.\n";
   }
   if (report.failed === 0 && visibleWarnings === 0) {
-    output += "Your install is ready.\n";
+    output += `${success("Your install is ready.", out)}\n`;
   }
   if (!verbose) {
-    output += `Run '${aidlcInvocation()} doctor --verbose' to see every check.\n`;
+    output += `${dim(
+      `Run '${aidlcInvocation()} doctor --verbose' to see every check.`,
+      out,
+    )}\n`;
   }
   return output;
 }
@@ -328,6 +354,7 @@ function writeExport(
 }
 
 export async function main(argv: string[]): Promise<void> {
+  configureColor(argv);
   const { flags } = parseArgs(argv);
   const projectDir = resolveProjectDir(flags["project-dir"]);
   const update = await doctorUpdateState(flags);

@@ -9,6 +9,15 @@ import {
   parseDispatcherWorkspaceCommand,
   type RouteNamespaceName,
 } from "./aidlc-command.ts";
+import {
+  cmd,
+  configureColor,
+  dim,
+  errorLabel,
+  fixLabel,
+  heading,
+  tipLabel,
+} from "./aidlc-color.ts";
 import { AIDLC_VERSION } from "./aidlc-version.ts";
 import {
   aidlcInvocation,
@@ -1007,31 +1016,34 @@ export function listRoutes(): readonly Route[] {
 
 export function renderHumanHelp(): string {
   const invoke = aidlcInvocation();
+  const out = process.stdout;
+  const row = (name: string, summary: string): string =>
+    `  ${cmd(name, out)}${" ".repeat(12 - name.length)}${summary}`;
   return [
     "aidlc - structured AI-driven development for your coding agent",
     "",
-    "USAGE",
-    `  ${invoke} <command> [flags]`,
+    heading("USAGE", out),
+    `  ${cmd(`${invoke} <command> [flags]`, out)}`,
     "",
-    "SET UP A PROJECT",
-    "  config      Set up, refresh, or pin this project (run bare for the guided setup)",
-    "  doctor      Check this machine and project, with fixes for anything wrong",
+    heading("SET UP A PROJECT", out),
+    row("config", "Set up, refresh, or pin this project (run bare for the guided setup)"),
+    row("doctor", "Check this machine and project, with fixes for anything wrong"),
     "",
-    "MANAGE THE MACHINE INSTALL",
-    "  update      Install and switch to a newer release",
-    "  use         Switch to an exact installed release",
-    "  version     Print binary and runtime versions",
-    "  uninstall   Remove aidlc from this machine",
+    heading("MANAGE THE MACHINE INSTALL", out),
+    row("update", "Install and switch to a newer release"),
+    row("use", "Switch to an exact installed release"),
+    row("version", "Print binary and runtime versions"),
+    row("uninstall", "Remove aidlc from this machine"),
     "",
-    "EXAMPLES",
-    `  ${invoke} config                     guided setup in the current project`,
-    `  ${invoke} config models --show       see which model each agent uses, and why`,
-    `  ${invoke} doctor                     find out why something isn't working`,
+    heading("EXAMPLES", out),
+    `  ${cmd(`${invoke} config`, out)}                     guided setup in the current project`,
+    `  ${cmd(`${invoke} config models --show`, out)}       see which model each agent uses, and why`,
+    `  ${cmd(`${invoke} doctor`, out)}                     find out why something isn't working`,
     "",
-    "LEARN MORE",
-    `  Use '${invoke} <command> --help' for more about a command.`,
-    "  Docs: https://awslabs.github.io/aidlc-workflows/",
-    `  Agents: workflows run through '${invoke} engine' - see '${invoke} engine --help'.`,
+    heading("LEARN MORE", out),
+    dim(`  Use '${invoke} <command> --help' for more about a command.`, out),
+    dim("  Docs: https://awslabs.github.io/aidlc-workflows/", out),
+    dim(`  Agents: workflows run through '${invoke} engine' - see '${invoke} engine --help'.`, out),
     "",
   ].join("\n");
 }
@@ -1053,35 +1065,38 @@ export function renderCommandHelp(command: PublicCommand): string {
   );
   if (!route) throw new Error(`dispatcher route registry is missing public command ${command}`);
   const invoke = aidlcInvocation();
+  const out = process.stdout;
   if (command === "config") {
+    const sectionRow = (name: string, summary: string): string =>
+      `  ${cmd(name, out)}${" ".repeat(12 - name.length)}${summary}`;
     return [
       "Set up, refresh, or change AI-DLC project configuration",
       "",
-      "USAGE",
-      `  ${invoke} config`,
-      `  ${invoke} config <section> [flags]`,
+      heading("USAGE", out),
+      `  ${cmd(`${invoke} config`, out)}`,
+      `  ${cmd(`${invoke} config <section> [flags]`, out)}`,
       "",
-      "SECTIONS",
-      "  models      Which model and effort each agent uses (presets: thorough, balanced, minimal)",
-      "  runtime     Whether hooks can find bun, aidlc, and the selected harness",
-      "  providers   Provider, AWS region/profile, and manual provider actions",
-      "  trust       Host trust and command allowlist acknowledgement",
-      "  flags       Default scope, swarm, hook debug, sensor timeout, and bypasses",
-      "  project     Plugins, MCP servers, and shell completions",
+      heading("SECTIONS", out),
+      sectionRow("models", "Which model and effort each agent uses (presets: thorough, balanced, minimal)"),
+      sectionRow("runtime", "Whether hooks can find bun, aidlc, and the selected harness"),
+      sectionRow("providers", "Provider, AWS region/profile, and manual provider actions"),
+      sectionRow("trust", "Host trust and command allowlist acknowledgement"),
+      sectionRow("flags", "Default scope, swarm, hook debug, sensor timeout, and bypasses"),
+      sectionRow("project", "Plugins, MCP servers, and shell completions"),
       "",
-      "COMMON FLAGS",
+      heading("COMMON FLAGS", out),
       "  --pin <version>   Pin this project to an installed release",
       "  --show            Show the selected section without changing it",
       "  --dry-run         Print the transaction plan without writing",
       "  --yes             Confirm explicit choices; it never chooses values",
       "",
-      "EXAMPLES",
-      `  ${invoke} config`,
-      `  ${invoke} config models --show`,
-      `  ${invoke} config models --preset thorough --project --yes`,
+      heading("EXAMPLES", out),
+      `  ${cmd(`${invoke} config`, out)}`,
+      `  ${cmd(`${invoke} config models --show`, out)}`,
+      `  ${cmd(`${invoke} config models --preset thorough --project --yes`, out)}`,
       "",
-      "Every interactive question has an equivalent flag for non-interactive use.",
-      `Full flag reference: ${invoke} config <section> --help`,
+      dim("Every interactive question has an equivalent flag for non-interactive use.", out),
+      dim(`Full flag reference: ${invoke} config <section> --help`, out),
       "",
     ].join("\n");
   }
@@ -1101,13 +1116,19 @@ export function renderCommandHelp(command: PublicCommand): string {
   return [
     descriptions[command],
     "",
-    "USAGE",
-    `  ${invoke} ${COMMAND_HELP_USAGE[command].replace(/^aidlc\s+/, "")}`,
+    heading("USAGE", out),
+    `  ${cmd(`${invoke} ${COMMAND_HELP_USAGE[command].replace(/^aidlc\s+/, "")}`, out)}`,
     ...(examples[command]?.length
-      ? ["", "EXAMPLES", ...(examples[command] ?? [])]
+      ? [
+          "",
+          heading("EXAMPLES", out),
+          ...(examples[command] ?? []).map((line) =>
+            `  ${cmd(line.trimStart(), out)}`
+          ),
+        ]
       : []),
     "",
-    `Run '${invoke} --help' for the public command list.`,
+    dim(`Run '${invoke} --help' for the public command list.`, out),
     "",
   ].join("\n");
 }
@@ -1241,8 +1262,10 @@ function publicCommandError(command: string): Action {
     code: 2,
     message: `aidlc: unknown command or noun '${command}'; try 'aidlc --help'\n`,
     humanMessage:
-      `error: unknown command '${command}'\n${tip}\n` +
-      `usage: ${invoke} <command> [flags]\n` +
+      `${errorLabel("error:", process.stderr)} unknown command '${command}'\n${
+        tip ? `\n  ${tipLabel("tip:", process.stderr)} did you mean '${nearest?.candidate}'?\n` : ""
+      }\n` +
+      `${heading("usage:", process.stderr)} ${invoke} <command> [flags]\n` +
       `For the full list, run '${invoke} --help'.\n`,
   };
 }
@@ -2149,8 +2172,10 @@ function renderDispatcherFailure(
   } else if (mode === "quiet") {
     text(1, `${remediation ?? cleanMessage}\n`);
   } else {
-    text(2, `aidlc: ${cleanMessage}\n`);
-    if (remediation) text(2, `fix: ${remediation}\n`);
+    text(2, `${errorLabel("aidlc:", process.stderr)} ${cleanMessage}\n`);
+    if (remediation) {
+      text(2, `${fixLabel("fix:", process.stderr)} ${remediation}\n`);
+    }
   }
   return code;
 }
@@ -2208,6 +2233,7 @@ async function withRoutePolicy(route: Route, argv: readonly string[], run: () =>
 export async function main(argv: string[]): Promise<void> {
   process.exitCode = 0;
   bufferedStdin = null;
+  configureColor(argv);
   if (argv.length === 1 && argv[0] === "--internal-metrics-send") {
     const metrics = await import("./aidlc-metrics.ts");
     await metrics.sendMetricFromStdin();
