@@ -237,12 +237,14 @@ describe("t300 copied projection configuration", () => {
 
   test("copy-channel doctor, config, and error output never leaks native invocations", () => {
     const project = readmeCopyProject();
+    const machineRoot = temp("aidlc-t300-machine-");
+    const env = { AIDLC_INSTALL_ROOT: machineRoot };
     const git = spawnSync("git", ["init", "-q"], {
       cwd: project,
       encoding: "utf-8",
     });
     expect(git.status, git.stderr ?? "").toBe(0);
-    const doctor = runCopied(project, ["doctor"]);
+    const doctor = runCopied(project, ["doctor"], { env });
     expect(doctor.status).toBe(0);
     expect(doctor.stdout).toContain(
       "fix: run `bun .claude/tools/aidlc.ts update --check`",
@@ -251,14 +253,14 @@ describe("t300 copied projection configuration", () => {
       "fix: run `bun .claude/tools/aidlc.ts doctor --verbose`",
     );
 
-    const topTypo = runCopied(project, ["confg"]);
+    const topTypo = runCopied(project, ["confg"], { env });
     expect(topTypo.status).toBe(2);
     expect(topTypo.stderr).toContain(
       "usage: bun .claude/tools/aidlc.ts <command> [flags]",
     );
 
     const sectionTypo = runCopied(project, ["config", "modles"], {
-      env: { AIDLC_TEST_CONFIG_TTY: "1" },
+      env: { ...env, AIDLC_TEST_CONFIG_TTY: "1" },
       input: "",
     });
     expect(sectionTypo.status).toBe(2);
@@ -272,7 +274,7 @@ describe("t300 copied projection configuration", () => {
       "--preset",
       "balanced",
       "--project",
-    ]);
+    ], { env });
     expect(noYes.status).toBe(2);
 
     for (const result of [doctor, topTypo, sectionTypo, noYes]) {

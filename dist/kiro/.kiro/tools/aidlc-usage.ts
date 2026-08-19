@@ -25,6 +25,8 @@
 // across concurrent sub-agent files, so `(sourceFile, uuid)` is the only unique
 // key) are documented in docs/reference/06-hooks-and-tools.md.
 
+import { dlopen, ptr } from "bun:ffi";
+import { createHash } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -40,6 +42,7 @@ import {
   activeIntent,
   activeIntentUuid,
   activeSpace,
+  auditLockIdentity,
   modelRatesPath,
   readSessionIntentUuid,
   resolveProjectFlag,
@@ -1014,8 +1017,52 @@ function foldRowIntoLedger(
 
 const USAGE_LOCK_INTENT = "__usage-ledger__";
 const USAGE_LOCK_SPACE = "__runtime__";
+// The directory lock's stale-reaper restore gap can admit two holders on Win32.
+// A kernel mutex closes that gap and transfers ownership after an abandoned owner.
+const WIN32_USAGE_MUTEX =
+  process.platform === "win32"
+    ? dlopen("kernel32.dll", {
+        CreateMutexW: { args: ["ptr", "i32", "ptr"], returns: "ptr" },
+        WaitForSingleObject: { args: ["ptr", "u32"], returns: "u32" },
+        ReleaseMutex: { args: ["ptr"], returns: "i32" },
+        CloseHandle: { args: ["ptr"], returns: "i32" },
+      })
+    : null;
+
+const WAIT_OBJECT_0 = 0;
+const WAIT_ABANDONED = 0x80;
+const USAGE_MUTEX_WAIT_MS = 5000;
 
 function withUsageLedgerLock(projectDir: string, fn: () => Ledger): Ledger {
+  if (WIN32_USAGE_MUTEX !== null) {
+    const identity = auditLockIdentity(
+      projectDir,
+      USAGE_LOCK_INTENT,
+      USAGE_LOCK_SPACE,
+    );
+    const hash = createHash("sha256").update(identity).digest("hex").slice(0, 32);
+    const name = Buffer.from(`Global\\aidlc-usage-${hash}\0`, "utf16le");
+    const handle = WIN32_USAGE_MUTEX.symbols.CreateMutexW(null, 0, ptr(name));
+    if (handle === null) {
+      throw new Error("Failed to create the Windows usage-ledger mutex");
+    }
+    const waitResult = WIN32_USAGE_MUTEX.symbols.WaitForSingleObject(
+      handle,
+      USAGE_MUTEX_WAIT_MS,
+    );
+    if (waitResult !== WAIT_OBJECT_0 && waitResult !== WAIT_ABANDONED) {
+      WIN32_USAGE_MUTEX.symbols.CloseHandle(handle);
+      throw new Error(
+        `Failed to acquire the Windows usage-ledger mutex: ${waitResult}`,
+      );
+    }
+    try {
+      return fn();
+    } finally {
+      WIN32_USAGE_MUTEX.symbols.ReleaseMutex(handle);
+      WIN32_USAGE_MUTEX.symbols.CloseHandle(handle);
+    }
+  }
   return withAuditLock(
     projectDir,
     fn,
