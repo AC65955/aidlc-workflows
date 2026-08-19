@@ -317,13 +317,13 @@
       "sha256:970e71fb01e83c2a54df0563adcc0af8781890ab8600dd209a91963bb6746873"
     ],
     ".claude/tools/aidlc-command.ts": [
-      "sha256:ef7d211de14056750059115aeb518197a86867002f5a62d024b64f5d24ea0b4f"
+      "sha256:f320a3ded6628a98651f2596a633ecb3415b318e2e4e6c2f2d109cba5c737770"
     ],
     ".claude/tools/aidlc-runtime-paths.ts": [
       "sha256:aa2048949ce819b47dfe4ac41dd6e0dcb6cbf80c623864ddd411aa723dbda705"
     ],
     ".claude/tools/aidlc-utility.ts": [
-      "sha256:58c788cb3a1e04204e14a2e3b29a41daa4c05ef426f7ac43586bd3e042109cce"
+      "sha256:8648913ae76445b915f07d753f9a4b9d93c9bac8d52e0d9696a5c865840ceef8"
     ],
     ".claude/tools/data/aidlc-projection.json": [
       "sha256:a3d97300caefa9f644fa8d7b84f7c2a768da334522e3c079f04a51b87aec5b9c"

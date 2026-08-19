@@ -297,10 +297,16 @@ curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del in
 # Copy the implementation (engine + the workspace shell sibling), then launch
 cp -r dist/claude/.claude/ your-project/.claude/
 cp -r dist/claude/aidlc/   your-project/aidlc/     # the workspace shell — a sibling of .claude/, not inside it
-cd your-project && claude
+cd your-project
+bun .claude/tools/aidlc.ts config                  # optional guided policy/provider/trust setup
+claude
 ```
 
 The `aidlc/` shell ships the pre-built `aidlc/spaces/default/memory/` method tree the engine reads; `/aidlc --doctor` fails its "workspace shell ready" check without it.
+The guided config command recognizes the copied projection and records answers
+without requiring a native machine install. You may skip it and open Claude
+Code directly. Refreshing framework files later requires either a native
+release or re-copying `dist/claude/` from the checkout.
 
 Then, inside the Claude Code session:
 

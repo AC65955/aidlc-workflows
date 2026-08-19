@@ -341,6 +341,11 @@ async function download(
       }
     }
     if (!response) throw new ReleaseUnavailableError(`${redact(url)} returned no response`);
+    if (response.status === 404) {
+      throw new ReleaseUnavailableError(
+        "No published native release is available yet. Use the copy channel from the aidlc-workflows checkout, or pass --from <release-directory>.",
+      );
+    }
     if (!response.ok) {
       throw new ReleaseUnavailableError(`${redact(url)} returned HTTP ${response.status}`);
     }

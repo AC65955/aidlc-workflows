@@ -116,8 +116,10 @@ describe("t299 first-run setup wizard", () => {
     const result = runWizard("\n", { aidlc: false, runtimeIssue: true });
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(result.stdout).toContain("AI-DLC setup - first run in this project.");
-    expect(result.stdout).toContain("Claude Code detected  (claude 2.1.220 on your PATH)");
-    expect(result.stdout).toContain("credentials found  (instance role, region us-east-2)");
+    expect(result.stdout).toContain("Claude Code detected  (2.1.220 on your PATH)");
+    expect(result.stdout).toContain(
+      "credentials found  (instance role, detected region us-east-2)",
+    );
     expect(result.stdout).toContain("1. Yes, use recommended defaults");
     expect(result.stdout).toContain("MCP servers on, all plugins, Bedrock via your AWS credentials");
     expect(result.stdout).toContain("Writing project files ... done");
@@ -125,7 +127,9 @@ describe("t299 first-run setup wizard", () => {
       "Recording your choices ... done  (aidlc.settings.json in this project)",
     );
     expect(result.stdout).toContain('export PATH="$HOME/.local/bin:$PATH"');
-    expect(result.stdout).toContain("Full diagnostics: aidlc config runtime --show");
+    expect(result.stdout).toContain(
+      "Full diagnostics: bun .claude/tools/aidlc.ts config runtime --show",
+    );
     expect(result.stdout).toContain('/aidlc "what you want built"');
     expect(existsSync(join(result.project, ".claude"))).toBe(true);
     expect(JSON.parse(
@@ -139,6 +143,7 @@ describe("t299 first-run setup wizard", () => {
     );
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(result.stdout).toContain("Customize setup - 6 steps");
+    expect(result.stdout).toContain("Kiro IDE        (not probed)");
     for (let step = 1; step <= 6; step++) {
       expect(result.stdout).toContain(`Step ${step} of 6`);
     }
@@ -179,7 +184,7 @@ describe("t299 first-run setup wizard", () => {
 
   test("Ctrl-C sentinel exits before apply with Nothing written", () => {
     const result = runWizard("\u0003\n");
-    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.status, result.stdout + result.stderr).toBe(2);
     expect(result.stdout).toContain("Nothing written.");
     expect(existsSync(join(result.project, ".claude"))).toBe(false);
   });

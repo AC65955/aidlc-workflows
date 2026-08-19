@@ -398,15 +398,20 @@ export function emitResult(result: CommandResult, options: GlobalOptions): void 
     const output = result.ok ? result.message : (result.remediation ?? result.message);
     if (output) process.stdout.write(`${output}\n`);
   } else {
-    const label = result.code === EXIT.actionNeeded
-      ? "ACTION"
-      : result.ok
-      ? "PASS"
-      : result.code === EXIT.integrity
-      ? "FAIL"
-      : "ERROR";
-    process.stdout.write(`${label} ${result.message}\n`);
-    if (result.remediation) process.stdout.write(`Run: ${result.remediation}\n`);
+    if (result.ok) {
+      process.stdout.write(`${result.message}\n`);
+    } else if (result.code === EXIT.actionNeeded) {
+      process.stdout.write(`action: ${result.message}\n`);
+    } else {
+      process.stdout.write(`error: ${result.message}\n`);
+    }
+    if (result.remediation) {
+      process.stdout.write(
+        `${result.status === "usage" ? "usage" : "fix"}: ${result.remediation}\n`,
+      );
+    } else if (result.status === "usage") {
+      process.stdout.write("usage: rerun with --help for valid usage\n");
+    }
   }
   process.exitCode = result.code;
 }

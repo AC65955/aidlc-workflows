@@ -225,7 +225,8 @@ export async function refreshUpdateState(
       return {
         ...previous,
         state: "unavailable",
-        message: `update refresh unavailable; cached latest is ${previous.latestVersion}`,
+        message:
+          `update refresh unavailable; cached version ${previous.latestVersion} is stale or unverifiable`,
       };
     }
     return {

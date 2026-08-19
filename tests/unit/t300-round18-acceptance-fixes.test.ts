@@ -1,0 +1,319 @@
+// covers: tool:aidlc-init, function:probeHarnessCli, function:providerDoctorCheck, function:acquireRelease
+
+import { afterAll, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { REPO_ROOT } from "../harness/fixtures.ts";
+import {
+  probeHarnessCli,
+  providerDoctorCheck,
+} from "../../core/tools/aidlc-config-diagnostics.ts";
+import { firstRunPathRemediation } from "../../core/tools/aidlc-init.ts";
+import { acquireRelease } from "../../core/tools/aidlc-release.ts";
+
+const BUN = process.execPath;
+const INIT = join(REPO_ROOT, "core", "tools", "aidlc-init.ts");
+const DIST = join(REPO_ROOT, "dist");
+const DIST_RELEASE = join(REPO_ROOT, "dist-release");
+const temporary: string[] = [];
+
+afterAll(() => {
+  for (const path of temporary) rmSync(path, { recursive: true, force: true });
+});
+
+function temp(prefix: string): string {
+  const path = mkdtempSync(join(tmpdir(), prefix));
+  temporary.push(path);
+  return path;
+}
+
+function cleanEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const name of Object.keys(env)) {
+    if (name.startsWith("AIDLC_") || name.startsWith("CLAUDE_") || name.startsWith("KIRO_")) {
+      delete env[name];
+    }
+  }
+  return { ...env, ...extra };
+}
+
+function readmeCopyProject(): string {
+  const project = temp("aidlc-t300-copy-");
+  mkdirSync(join(project, ".git"));
+  cpSync(join(DIST, "claude", ".claude"), join(project, ".claude"), {
+    recursive: true,
+  });
+  cpSync(join(DIST, "claude", "aidlc"), join(project, "aidlc"), {
+    recursive: true,
+  });
+  return project;
+}
+
+function runCopied(
+  project: string,
+  args: string[],
+  options: { input?: string; env?: NodeJS.ProcessEnv } = {},
+): { status: number; stdout: string; stderr: string } {
+  const result = spawnSync(
+    BUN,
+    [join(project, ".claude", "tools", "aidlc.ts"), ...args],
+    {
+      cwd: project,
+      env: cleanEnv(options.env),
+      input: options.input,
+      encoding: "utf-8",
+      timeout: 30_000,
+    },
+  );
+  if (result.error) throw result.error;
+  return {
+    status: result.status ?? -1,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
+}
+
+function runWizard(
+  input: string,
+  options: { hasCredentials?: boolean } = {},
+): {
+  project: string;
+  status: number;
+  stdout: string;
+  stderr: string;
+} {
+  const project = temp("aidlc-t300-wizard-");
+  mkdirSync(join(project, ".git"));
+  const hasCredentials = options.hasCredentials ?? true;
+  const detection = JSON.stringify({
+    harnesses: {
+      claude: { found: false, probed: true },
+      codex: { found: false, probed: true },
+      copilot: { found: false, probed: true },
+      cursor: { found: false, probed: true },
+      kiro: { found: false, probed: true },
+      "kiro-ide": { found: false, probed: false },
+      opencode: { found: false, probed: true },
+    },
+    aws: {
+      hasCredentials,
+      sources: hasCredentials ? ["fixture"] : [],
+      profiles: [],
+      regions: hasCredentials ? ["us-east-2"] : [],
+      files: [],
+    },
+    runtimeIssues: [],
+  });
+  const result = spawnSync(BUN, [INIT, "config", "--project-dir", project], {
+    cwd: project,
+    env: cleanEnv({
+      AIDLC_RUNTIME_ROOT: DIST_RELEASE,
+      AIDLC_TEST_CONFIG_TTY: "1",
+      AIDLC_TEST_CONFIG_DETECTION_JSON: detection,
+    }),
+    input,
+    encoding: "utf-8",
+    timeout: 10_000,
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  return {
+    project,
+    status: result.status ?? -1,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
+}
+
+describe("t300 copied projection configuration", () => {
+  test("the exact README Claude copy records settings and diagnostic answers without a runtime", () => {
+    const project = readmeCopyProject();
+    const models = runCopied(project, [
+      "config",
+      "models",
+      "--preset",
+      "balanced",
+      "--project",
+      "--yes",
+    ]);
+    expect(models.status, models.stdout + models.stderr).toBe(0);
+    expect(models.stdout).not.toContain("harness claude is not installed");
+
+    const providers = runCopied(project, [
+      "config",
+      "providers",
+      "--provider",
+      "other",
+      "--acknowledge",
+      "--yes",
+    ]);
+    expect(providers.status, providers.stdout + providers.stderr).toBe(0);
+
+    const trust = runCopied(project, [
+      "config",
+      "trust",
+      "--acknowledge",
+      "--yes",
+    ]);
+    expect(trust.status, trust.stdout + trust.stderr).toBe(0);
+
+    expect(JSON.parse(readFileSync(join(project, "aidlc.settings.json"), "utf-8")))
+      .toEqual(expect.objectContaining({
+        models: expect.objectContaining({ preset: "balanced" }),
+      }));
+    const harness = JSON.parse(
+      readFileSync(join(project, ".claude", "tools", "data", "harness.json"), "utf-8"),
+    );
+    expect(harness.providers.provider).toBe("other");
+    expect(harness.trust.reviewed).toBe(true);
+  }, 60_000);
+
+  test("bare config announces and uses the recognized copied-projection walk", () => {
+    const project = readmeCopyProject();
+    const result = runCopied(project, ["config"], {
+      input: "n\n",
+      env: { AIDLC_TEST_CONFIG_TTY: "1" },
+    });
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.stdout).toContain(
+      "using the existing copied projection",
+    );
+    expect(result.stdout).toContain("Setup check -");
+    expect(result.stdout).not.toContain("harness claude is not installed");
+  });
+
+  test("copy-channel project refresh names the two real source options", () => {
+    const project = readmeCopyProject();
+    const result = runCopied(project, [
+      "config",
+      "project",
+      "--plugins",
+      "all",
+      "--mcp",
+      "none",
+      "--yes",
+    ]);
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("copy-channel project");
+    expect(result.stdout).toContain("Install the native aidlc command");
+    expect(result.stdout).toContain("re-copy the matching dist/<harness>/ tree");
+    expect(result.stdout).not.toContain("harness claude is not installed");
+  });
+
+  test("human config usage errors use the shared lowercase voice", () => {
+    const project = readmeCopyProject();
+    const result = runCopied(project, [
+      "config",
+      "models",
+      "--preset",
+      "balanced",
+      "--project",
+    ]);
+    expect(result.status).toBe(2);
+    expect(result.stdout).toStartWith("error:");
+    expect(result.stdout).toContain("\nusage:");
+    expect(result.stdout).not.toContain("ERROR ");
+    expect(result.stdout).not.toContain("Run: ");
+  });
+});
+
+describe("t300 first-run prompt and detection safety", () => {
+  test("EOF at a no-default harness prompt cancels with bounded output", () => {
+    const result = runWizard("");
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain("Nothing written.");
+    expect(result.stdout.length).toBeLessThan(20_000);
+    expect(existsSync(join(result.project, ".claude"))).toBe(false);
+  });
+
+  test("EOF mid-customize cancels with bounded output", () => {
+    const result = runWizard("1\n2");
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain("Nothing written.");
+    expect(result.stdout.length).toBeLessThan(20_000);
+  });
+
+  test("a same-named executable is not detected when its version probe fails", () => {
+    expect(probeHarnessCli("claude", {
+      interactivePath: "/fixture",
+      which: () => "/fixture/claude",
+      run: () => ({ status: 1, stdout: "not claude\n" }),
+    })).toEqual(expect.objectContaining({
+      status: "missing",
+      path: "/fixture/claude",
+    }));
+    expect(probeHarnessCli("cursor", {
+      interactivePath: "/fixture",
+      which: (command) => command === "cursor" ? "/fixture/cursor" : null,
+      run: () => ({ status: 0, stdout: "Cursor 1.0.0\n" }),
+    })).toEqual(expect.objectContaining({
+      command: "cursor",
+      status: "found",
+    }));
+  });
+
+  test("Windows PATH remediation names the actual User PATH directory", () => {
+    expect(firstRunPathRemediation(
+      "win32",
+      "C:\\Users\\Example\\AppData\\Local\\aidlc\\bin",
+    )).toEqual([
+      "Add C:\\Users\\Example\\AppData\\Local\\aidlc\\bin to your User PATH in Windows Settings, then open a new terminal.",
+    ]);
+    expect(firstRunPathRemediation("linux", "/home/example/.local/bin").join("\n"))
+      .toContain('export PATH="$HOME/.local/bin:$PATH"');
+  });
+
+  test("recommended defaults without credentials leave provider setup manual", () => {
+    const result = runWizard("1\n\n", { hasCredentials: false });
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.stdout).toContain(
+      "provider recorded as other; manual provider setup remains",
+    );
+    expect(result.stdout).toContain("Choose and configure a model provider");
+    const harness = JSON.parse(
+      readFileSync(join(result.project, ".claude", "tools", "data", "harness.json"), "utf-8"),
+    );
+    expect(harness.providers).toBeUndefined();
+  }, 60_000);
+});
+
+describe("t300 diagnostics and release truthfulness", () => {
+  test("corrupt harness JSON is a failing provider doctor row with recovery", () => {
+    const project = readmeCopyProject();
+    const path = join(project, ".claude", "tools", "data", "harness.json");
+    writeFileSync(path, "{\n");
+    const check = providerDoctorCheck(project);
+    expect(check).toEqual(expect.objectContaining({
+      pass: false,
+      label: "Providers: could not read recorded answers",
+    }));
+    expect(check.severity).toBeUndefined();
+    expect(check.fix).toContain("restore");
+  });
+
+  test("HTTP 404 explains that no native release is published yet", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => new Response("missing", { status: 404 }),
+    });
+    try {
+      await expect(acquireRelease({
+        version: "9.9.9",
+        names: ["aidlc-linux-x64"],
+        baseUrl: `http://127.0.0.1:${server.port}`,
+      })).rejects.toThrow("No published native release is available yet");
+    } finally {
+      server.stop(true);
+    }
+  });
+});

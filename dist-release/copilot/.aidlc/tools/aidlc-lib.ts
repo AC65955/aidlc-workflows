@@ -5,6 +5,7 @@ import { hostname, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  aidlcInvocation,
   resolveHarnessPath,
 } from "./aidlc-runtime-paths.ts";
 import {
@@ -274,7 +275,9 @@ function readShippedHarnessData(): ShippedHarnessData {
     );
     if (policyKeys.length > 0) {
       throw new Error(
-        `${p}: harness.json contains policy key(s) ${policyKeys.join(", ")}; use aidlc.settings.json`,
+        `${p}: harness.json contains legacy policy key(s) ${policyKeys.join(", ")}. ` +
+          `Remove ${policyKeys.join(", ")} from ${p}, then run ` +
+          `'${aidlcInvocation()} config' to record policy in aidlc.settings.json.`,
       );
     }
     let plugins: ReadonlySet<string> | null = null;

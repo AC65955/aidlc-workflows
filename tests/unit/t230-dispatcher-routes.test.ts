@@ -1412,6 +1412,7 @@ describe("t230 dispatcher help and errors", () => {
     expect(text).toContain("MANAGE THE MACHINE INSTALL");
     expect(text).toContain("EXAMPLES");
     expect(text).toContain("LEARN MORE");
+    expect(text).not.toContain("  $ ");
     for (const command of ["config", "doctor", "update", "use", "version", "uninstall"]) {
       expect(text).toContain(`  ${command}`);
     }

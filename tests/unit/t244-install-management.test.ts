@@ -484,6 +484,9 @@ describe("t244 machine configuration and update discovery", () => {
       process.env.AIDLC_RELEASE_BASE_URL = captive.baseUrl;
       const unavailable = await refreshUpdateState(15_000);
       expect(unavailable.state).toBe("unavailable");
+      expect(unavailable.message).toBe(
+        `update refresh unavailable; cached version ${NEXT_VERSION} is stale or unverifiable`,
+      );
       expect(readFileSync(join(machine, "update-check.json"), "utf-8")).toBe(before);
       await captive.stop();
     } finally {

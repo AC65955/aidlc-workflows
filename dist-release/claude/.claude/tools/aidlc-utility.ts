@@ -142,6 +142,7 @@ import {
 } from "./aidlc-plugin.ts";
 import { executePlan } from "./aidlc-transaction.ts";
 import {
+  aidlcInvocation,
   aidlcDispatcherInvocation,
   aidlcToolInvocation,
   compiledExecutable,
@@ -1328,6 +1329,17 @@ export type DoctorReport = {
   failed: number;
 };
 
+function projectedFileRepair(
+  distribution: string,
+  relativePath: string,
+): string {
+  const invoke = aidlcInvocation();
+  if (invoke === "aidlc") {
+    return `run \`${invoke} config --force\` to restore ${relativePath} from the installed runtime`;
+  }
+  return `restore ${relativePath} from git, or re-copy \`dist/${distribution}/${relativePath}\` from the aidlc-workflows checkout`;
+}
+
 export async function collectDoctorReport(
   projectDir: string,
   extraChecks: readonly DoctorCheck[] = [],
@@ -1354,8 +1366,8 @@ export async function collectDoctorReport(
         ? `Installed runtime ${installedVersion} is incomplete: ${installedState.reason ?? "unknown reason"}`
         : "Installed runtime: active version marker unavailable",
       fix: installedState.complete
-        ? "run `aidlc config --harness <name>`"
-        : "run `aidlc config --harness <name>`",
+        ? `run \`${aidlcInvocation()} config --harness <name>\``
+        : `run \`${aidlcInvocation()} config --harness <name>\``,
     });
     const command = commandPath();
     const expectedExecutable = installedVersion
@@ -1526,7 +1538,7 @@ export async function collectDoctorReport(
           }, native hooks ${nativeHooks ? "present" : "missing"}, native permission/trust ${
             nativePermission ? "present" : "missing"
           }`,
-        fix: "refresh the project with `aidlc config`",
+        fix: `refresh the project with \`${aidlcInvocation()} config\``,
       });
     }
   } else {
@@ -1591,13 +1603,13 @@ export async function collectDoctorReport(
         label: stampVersion === AIDLC_VERSION
           ? `Project runtime stamp: ${stampVersion} (${stamp.distribution ?? "unknown"})`
           : `Project runtime stamp: ${stampVersion}; selected engine: ${AIDLC_VERSION}`,
-        fix: `run \`aidlc config\` or select the machine release with \`aidlc use ${stampVersion}\``,
+        fix: `run \`${aidlcInvocation()} config\` or select the machine release with \`${aidlcInvocation()} use ${stampVersion}\``,
       });
     } catch {
       results.push({
         pass: false,
         label: "Project runtime stamp is malformed",
-        fix: "refresh the project with `aidlc config`",
+        fix: `refresh the project with \`${aidlcInvocation()} config\``,
       });
     }
   }
@@ -1609,7 +1621,7 @@ export async function collectDoctorReport(
       results.push({
         pass: false,
         label: `Project pin is malformed: ${JSON.stringify(pinned)}`,
-        fix: "run `aidlc config --unpin` or write one strict semver",
+        fix: `run \`${aidlcInvocation()} config --unpin\` or write one strict semver`,
       });
     } else {
       const distribution = (() => {
@@ -1633,7 +1645,7 @@ export async function collectDoctorReport(
         label: pinState.complete
           ? `Project pin: ${pinned} is installed`
           : `Project pin: ${pinned} is not installed completely`,
-        fix: `run \`aidlc config --pin ${pinned}\``,
+        fix: `run \`${aidlcInvocation()} config --pin ${pinned}\``,
       });
       const targetState = inspectProjectPinTarget(projectDir, pinned);
       results.push({
@@ -1641,7 +1653,7 @@ export async function collectDoctorReport(
         label: targetState.valid
           ? `Project pin target: ${pinned} resolves before engine startup`
           : `Project pin target: ${targetState.reason ?? "invalid"}`,
-        fix: `run \`aidlc config --pin ${pinned}\``,
+        fix: `run \`${aidlcInvocation()} config --pin ${pinned}\``,
       });
     }
   }
@@ -1716,7 +1728,7 @@ export async function collectDoctorReport(
       results.push({
         pass: false,
         label: "Hook contract: settings.json unreadable - cannot verify wired hooks",
-        fix: "restore .claude/settings.json (copy from `dist/claude/.claude/settings.json`)",
+        fix: projectedFileRepair("claude", ".claude/settings.json"),
       });
     } else if (expectedHooks.length === 0) {
       // settings.json parsed but wires no aidlc hooks — also loud (a stripped
@@ -1724,7 +1736,7 @@ export async function collectDoctorReport(
       results.push({
         pass: false,
         label: "Hook contract: settings.json wires no aidlc-*.ts hooks",
-        fix: "restore the hooks block in .claude/settings.json (copy from `dist/claude/.claude/settings.json`)",
+        fix: projectedFileRepair("claude", ".claude/settings.json"),
       });
     } else {
       for (const h of expectedHooks) {
@@ -1781,14 +1793,20 @@ export async function collectDoctorReport(
         results.push({
           pass: existsSync(copilotAdapter),
           label: "hooks/aidlc-copilot-adapter.ts present (hook shim)",
-          fix: "copy from `dist/copilot/.aidlc/hooks/aidlc-copilot-adapter.ts`",
+          fix: projectedFileRepair(
+            "copilot",
+            ".aidlc/hooks/aidlc-copilot-adapter.ts",
+          ),
         });
       } else {
         const adapterPath = join(projectDir, ".opencode", "plugin", "aidlc-opencode-adapter.ts");
         results.push({
           pass: existsSync(adapterPath),
           label: "plugin/aidlc-opencode-adapter.ts present (hook wiring)",
-          fix: "copy from `dist/opencode/.opencode/plugin/aidlc-opencode-adapter.ts`",
+          fix: projectedFileRepair(
+            "opencode",
+            ".opencode/plugin/aidlc-opencode-adapter.ts",
+          ),
         });
       }
     }
@@ -1803,24 +1821,24 @@ export async function collectDoctorReport(
     results.push({
       pass: existsSync(agentPath),
       label: "agents/aidlc.json present (hook + permission wiring)",
-      fix: "copy from `dist/kiro/.kiro/agents/aidlc.json`",
+      fix: projectedFileRepair("kiro", ".kiro/agents/aidlc.json"),
     });
     const cliSettingsPath = join(projectDir, harness, "settings", "cli.json");
     results.push({
       pass: existsSync(cliSettingsPath),
       label: "settings/cli.json present (workspace default-agent activation)",
-      fix: "copy from `dist/kiro/.kiro/settings/cli.json` (or use `kiro-cli chat --agent aidlc`)",
+      fix: `${projectedFileRepair("kiro", ".kiro/settings/cli.json")} (or use \`kiro-cli chat --agent aidlc\`)`,
     });
   } else if (harness === ".codex") {
-    for (const [file, what, from] of [
-      ["config.toml", "model/provider/sandbox config", "dist/codex/.codex/config.toml"],
-      ["hooks.json", "hook wiring", "dist/codex/.codex/hooks.json"],
-      ["rules/default.rules", "permission prefix rules", "dist/codex/.codex/rules/default.rules"],
+    for (const [file, what] of [
+      ["config.toml", "model/provider/sandbox config"],
+      ["hooks.json", "hook wiring"],
+      ["rules/default.rules", "permission prefix rules"],
     ] as const) {
       results.push({
         pass: existsSync(join(projectDir, harness, file)),
         label: `${file} present (${what})`,
-        fix: `copy from \`${from}\``,
+        fix: projectedFileRepair("codex", `.codex/${file}`),
       });
     }
     // Hook trust reminder: untrusted project hooks never fire.
@@ -1833,16 +1851,16 @@ export async function collectDoctorReport(
   } else if (harness === ".aidlc" && isCopilot) {
     // Copilot (CLI + VS Code, one install): the wiring config is
     // .github/hooks/aidlc.json; skills and personas ride .github/{skills,agents}.
-    for (const [file, what, from] of [
-      [".github/hooks/aidlc.json", "hook wiring", "dist/copilot/.github/hooks/aidlc.json"],
-      [".github/skills/aidlc/SKILL.md", "/aidlc entry point", "dist/copilot/.github/skills/aidlc/SKILL.md"],
-      [".github/agents/aidlc-developer-agent.md", "persona custom agents", "dist/copilot/.github/agents/"],
-      ["AGENTS.md", "onboarding + method imports", "dist/copilot/AGENTS.md"],
+    for (const [file, what] of [
+      [".github/hooks/aidlc.json", "hook wiring"],
+      [".github/skills/aidlc/SKILL.md", "/aidlc entry point"],
+      [".github/agents/aidlc-developer-agent.md", "persona custom agents"],
+      ["AGENTS.md", "onboarding + method imports"],
     ] as const) {
       results.push({
         pass: existsSync(join(projectDir, file)),
         label: `${file} present (${what})`,
-        fix: `copy from \`${from}\``,
+        fix: projectedFileRepair("copilot", file),
       });
     }
     // Folder trust: untrusted project hooks silently never fire (no warning
@@ -1905,19 +1923,19 @@ export async function collectDoctorReport(
   } else if (harness === ".cursor") {
     // Cursor: hooks.json (the hook wiring), cli.json (permissions), and the
     // standing + phase method rule pointers are all inside .cursor/.
-    for (const [file, what, from] of [
-      ["hooks.json", "hook wiring", "dist/cursor/.cursor/hooks.json"],
-      ["cli.json", "Shell(bun) permission pre-approval", "dist/cursor/.cursor/cli.json"],
-      ["rules/aidlc.mdc", "standing method rule (alwaysApply read instruction)", "dist/cursor/.cursor/rules/aidlc.mdc"],
-      ["rules/aidlc-phase-ideation.mdc", "Ideation phase rule (agent-decided read instruction)", "dist/cursor/.cursor/rules/aidlc-phase-ideation.mdc"],
-      ["rules/aidlc-phase-inception.mdc", "Inception phase rule (agent-decided read instruction)", "dist/cursor/.cursor/rules/aidlc-phase-inception.mdc"],
-      ["rules/aidlc-phase-construction.mdc", "Construction phase rule (agent-decided read instruction)", "dist/cursor/.cursor/rules/aidlc-phase-construction.mdc"],
-      ["rules/aidlc-phase-operation.mdc", "Operation phase rule (agent-decided read instruction)", "dist/cursor/.cursor/rules/aidlc-phase-operation.mdc"],
+    for (const [file, what] of [
+      ["hooks.json", "hook wiring"],
+      ["cli.json", "Shell(bun) permission pre-approval"],
+      ["rules/aidlc.mdc", "standing method rule (alwaysApply read instruction)"],
+      ["rules/aidlc-phase-ideation.mdc", "Ideation phase rule (agent-decided read instruction)"],
+      ["rules/aidlc-phase-inception.mdc", "Inception phase rule (agent-decided read instruction)"],
+      ["rules/aidlc-phase-construction.mdc", "Construction phase rule (agent-decided read instruction)"],
+      ["rules/aidlc-phase-operation.mdc", "Operation phase rule (agent-decided read instruction)"],
     ] as const) {
       results.push({
         pass: existsSync(join(projectDir, harness, file)),
         label: `${file} present (${what})`,
-        fix: `copy from \`${from}\``,
+        fix: projectedFileRepair("cursor", `.cursor/${file}`),
       });
     }
   } else if (harness === ".aidlc") {
@@ -1929,19 +1947,19 @@ export async function collectDoctorReport(
     results.push({
       pass: existsSync(opencodeJson) || existsSync(opencodeJsonc),
       label: "opencode.json or opencode.jsonc present (permissions + method instructions glob)",
-      fix: "copy `dist/opencode/opencode.json` beside .opencode/, or merge it into opencode.jsonc",
+      fix: projectedFileRepair("opencode", "opencode.json"),
     });
     results.push({
       pass: existsSync(join(projectDir, ".opencode", "command", "aidlc.md")),
       label: ".opencode/command/aidlc.md present (/aidlc entry point)",
-      fix: "copy from `dist/opencode/.opencode/command/aidlc.md`",
+      fix: projectedFileRepair("opencode", ".opencode/command/aidlc.md"),
     });
   } else {
     const settingsPath = join(projectDir, harness, "settings.json");
     results.push({
       pass: existsSync(settingsPath),
       label: "settings.json present",
-      fix: "copy from `dist/claude/.claude/settings.json`",
+      fix: projectedFileRepair("claude", ".claude/settings.json"),
     });
   }
 

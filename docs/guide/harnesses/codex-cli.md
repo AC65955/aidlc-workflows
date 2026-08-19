@@ -138,8 +138,9 @@ git checkout v2
    bun .codex/tools/aidlc-utility.ts doctor
    ```
 
-This source/development channel requires Git and Bun. It does not use
-`aidlc config`; the copied tree already contains the project shell. Its
+This source/development channel requires Git and Bun. The copied tree already
+contains the project shell; its projected config command may still record
+guided choices without a native install. Its
 source-checkout trust generator is specific to Bun-shaped hook commands and is
 not used by the native channel.
 

@@ -10,9 +10,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, platform as hostPlatform } from "node:os";
-import { delimiter, extname, join, resolve } from "node:path";
+import { delimiter, extname, join, relative, resolve } from "node:path";
 import { sha256Bytes } from "./aidlc-distribution.ts";
-import { discoverProjectHarnesses } from "./aidlc-runtime-paths.ts";
+import {
+  aidlcInvocation,
+  discoverProjectHarnesses,
+} from "./aidlc-runtime-paths.ts";
 import type { ModelHarness } from "./aidlc-model-policy.ts";
 import {
   LOCAL_SETTINGS_FILE,
@@ -78,6 +81,12 @@ export type ConfigDiagnosticOverrides = {
   project?: ProjectChoicesRecord | null;
   plugins?: string[] | null;
 };
+
+function invocationForHarness(harnessDir: string): string {
+  return aidlcInvocation() === "aidlc"
+    ? "aidlc"
+    : `bun ${harnessDir}/tools/aidlc.ts`;
+}
 
 export type RuntimeBinaryProbe = {
   name: "bun" | "aidlc";
@@ -375,7 +384,9 @@ export function readConfigDiagnosticRecords(harnessRoot: string): ConfigDiagnost
   const policyKeys = ["models", "flags"].filter((key) => Object.hasOwn(value, key));
   if (policyKeys.length > 0) {
     throw new Error(
-      `${path}: harness.json contains policy key(s) ${policyKeys.join(", ")}; use aidlc.settings.json`,
+      `${path}: harness.json contains legacy policy key(s) ${policyKeys.join(", ")}. ` +
+        `Remove ${policyKeys.join(", ")} from ${path}, then run ` +
+        `'${aidlcInvocation()} config' to record policy in aidlc.settings.json.`,
     );
   }
   return {
@@ -618,9 +629,9 @@ const HARNESS_CLI: Record<
     install: "Install @github/copilot 1.0.74 or later for CLI use; VS Code-only installs may omit it.",
   },
   cursor: {
-    command: "agent",
+    command: "cursor",
     required: false,
-    install: "Install the Cursor agent CLI for terminal use; IDE-only installs may omit it.",
+    install: "Install the Cursor CLI and ensure `cursor --version` works; IDE-only installs may omit it.",
   },
   kiro: {
     command: "kiro-cli",
@@ -688,6 +699,17 @@ export function probeHarnessCli(
   const run = options.run ?? defaultRun;
   const result = run(path, ["--version"]);
   const version = result.stdout.trim();
+  if (result.status !== 0) {
+    return {
+      harness,
+      command: spec.command,
+      required: spec.required,
+      status: "missing",
+      path,
+      ...(spec.minimumVersion ? { minimumVersion: spec.minimumVersion } : {}),
+      remediation: spec.install,
+    };
+  }
   if (spec.minimumVersion && !versionAtLeast(version, spec.minimumVersion)) {
     return {
       harness,
@@ -1199,7 +1221,9 @@ export function flagFiles(
     }
     files.push({
       setting: `${layer} flag policy`,
-      file: info.path,
+      file: layer === "machine"
+        ? info.path
+        : relative(projectDir, info.path).replaceAll("\\", "/") || info.path,
     });
   }
   if (record?.defaultScope && harness === "claude") {
@@ -1233,7 +1257,15 @@ export function flagIssues(
       issues.push({
         id: `flag-env-override-${envName.toLowerCase().replaceAll("_", "-")}`,
         message:
-          `${envName}=${JSON.stringify(env[envName])} overrides the recorded answer ${JSON.stringify(recorded)}`,
+          `${envName}=${JSON.stringify(env[envName])} overrides the recorded answer ${
+            envName === "AIDLC_USE_SWARM" || envName === "AIDLC_HOOK_DEBUG"
+              ? record[
+                  envName === "AIDLC_USE_SWARM" ? "swarm" : "hookDebug"
+                ] === true
+                ? "on"
+                : "off"
+              : JSON.stringify(recorded)
+          }`,
         remediation:
           `Unset ${envName} to use the recorded project answer, or update the record to match the intended environment override.`,
       });
@@ -1768,6 +1800,7 @@ export function postApplyOutstandingActions(
     env?: NodeJS.ProcessEnv;
   } = {},
 ): ConfigOutstandingAction[] {
+  const invoke = invocationForHarness(harnessDir);
   const skipped = new Set(options.skipSections ?? []);
   const actions: ConfigOutstandingAction[] = [];
   if (!skipped.has("runtime")) {
@@ -1779,7 +1812,7 @@ export function postApplyOutstandingActions(
       section: "runtime" as const,
       id: issue.id,
       message: issue.message,
-      command: "aidlc config runtime",
+      command: `${invoke} config runtime`,
     })));
   }
   if (!skipped.has("trust")) {
@@ -1792,7 +1825,7 @@ export function postApplyOutstandingActions(
       section: "trust" as const,
       id: issue.id,
       message: issue.message,
-      command: "aidlc config trust",
+      command: `${invoke} config trust`,
     })));
   }
   if (!skipped.has("providers")) {
@@ -1804,14 +1837,14 @@ export function postApplyOutstandingActions(
         section: "providers" as const,
         id: issue.id,
         message: issue.message,
-        command: "aidlc config providers --check",
+        command: `${invoke} config providers --check`,
       })));
     } catch (error) {
       actions.push({
         section: "providers",
         id: "provider-record-unreadable",
         message: error instanceof Error ? error.message : String(error),
-        command: "aidlc config providers --check",
+        command: `${invoke} config providers --check`,
       });
     }
   }
@@ -1861,10 +1894,15 @@ function instructionStates(
     "aidlc-manifest.json",
   );
   if (!existsSync(baselinePath)) {
+    const instructionPath = harness === "claude"
+      ? `${harnessDir}/CLAUDE.md`
+      : "AGENTS.md";
     return [{
-      path: baselinePath,
+      path: instructionPath,
       kind: "whole-file",
-      state: "missing",
+      state: existsSync(join(projectDir, instructionPath))
+        ? "intact"
+        : "missing",
     }];
   }
   const baseline = JSON.parse(
@@ -1953,6 +1991,7 @@ export function instructionFileDoctorCheck(
       label: "Instruction file: no installed project harness",
     };
   }
+  const invoke = invocationForHarness(selected.harnessDir);
   let states: InstructionState[];
   try {
     states = instructionStates(
@@ -1975,7 +2014,7 @@ export function instructionFileDoctorCheck(
       severity: "warn",
       label:
         `Instruction file: hand-modified - conflict (${conflicts.map((item) => item.path).join(", ")})`,
-      fix: "review the local changes, then run `aidlc config`",
+      fix: `review the local changes, then run \`${invoke} config\``,
     };
   }
   const missing = states.filter((item) => item.state === "missing");
@@ -1984,8 +2023,8 @@ export function instructionFileDoctorCheck(
       pass: false,
       severity: "warn",
       label:
-        `Instruction file: block or file missing - run \`aidlc config\` (${missing.map((item) => item.path).join(", ")})`,
-      fix: "run `aidlc config`",
+        `Instruction file: block or file missing (${missing.map((item) => item.path).join(", ")})`,
+      fix: `run \`${invoke} config\``,
     };
   }
   const managed = states.some((item) => item.kind === "managed-block");
@@ -2097,11 +2136,14 @@ export function providerDoctorCheck(
           fix: issues.map((issue) => issue.message).join("; "),
         };
   } catch (error) {
+    const path = join(selected.root, "tools", "data", "harness.json");
     return {
       pass: false,
-      severity: "warn",
       label: "Providers: could not read recorded answers",
-      fix: error instanceof Error ? error.message : String(error),
+      fix:
+        `restore ${path} from git or re-copy dist/${selected.harness}/${selected.harnessDir}/tools/data/harness.json ` +
+        `from the aidlc-workflows checkout, then run \`${invocationForHarness(selected.harnessDir)} doctor\` ` +
+        `(${error instanceof Error ? error.message : String(error)})`,
     };
   }
 }

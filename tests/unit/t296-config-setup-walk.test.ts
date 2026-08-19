@@ -151,8 +151,13 @@ describe("t296 first-run config setup walk", () => {
     expect(result.stdout.match(/Fix the 2 sections that need you now\?/g))
       .toHaveLength(1);
     expect(result.stdout).not.toContain("Outstanding actions:");
-    expect(result.stdout).toContain("Setup complete. 1 action still needs you");
-    expect(result.stdout).toContain("runtime      aidlc config runtime");
+    expect(result.stdout).toContain("Setup complete. 2 actions still need you");
+    expect(result.stdout).toContain(
+      "runtime      bun .claude/tools/aidlc.ts config runtime",
+    );
+    expect(result.stdout).toContain(
+      "providers    bun .claude/tools/aidlc.ts config providers",
+    );
     expect(result.stdout.match(/aidlc is absent from the non-interactive hook PATH/g))
       .toHaveLength(1);
     expect(result.stdout.match(/no recorded answers; provider access unverified/g))
@@ -236,7 +241,7 @@ describe("t296 first-run config setup walk", () => {
     expect(runtimeWalk.stdout).not.toContain("Outstanding actions:");
     expect(runtimeWalk.stdout).toContain("Setup complete. 1 action still needs you");
     expect(runtimeWalk.stdout).toContain(
-      "Full diagnostics: aidlc config runtime --show",
+      "Full diagnostics: bun .claude/tools/aidlc.ts config runtime --show",
     );
   }, 60_000);
 
@@ -249,7 +254,7 @@ describe("t296 first-run config setup walk", () => {
     );
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(result.stdout).toBe(
-      `PASS configured ${path} for Claude Code ${AIDLC_VERSION}; ` +
+      `configured ${path} for Claude Code ${AIDLC_VERSION}; ` +
         "next: open Claude Code in this project and run `/aidlc --doctor`\n",
     );
   }, 60_000);

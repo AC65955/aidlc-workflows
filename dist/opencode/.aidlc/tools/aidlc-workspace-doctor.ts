@@ -31,6 +31,7 @@ import {
 /** One --doctor report row. Structurally matches handleDoctor's results[]. */
 export interface DoctorCheck {
   pass: boolean;
+  severity?: "warn";
   label: string;
   fix?: string;
 }
@@ -81,7 +82,8 @@ export function workspaceManifestChecks(projectDir: string): DoctorCheck[] {
         results.push({ pass: true, label: "Workspace records: no uncommitted changes under aidlc/" });
       } else {
         results.push({
-          pass: true,
+          pass: false,
+          severity: "warn",
           label:
             `Workspace records: ${dirty.length} uncommitted change(s) under aidlc/ (advisory - the shared records travel by git; ` +
             "commit & push so teammates get them: `git add aidlc/ && git commit && git push`)",

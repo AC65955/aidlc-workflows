@@ -1024,9 +1024,9 @@ export function renderHumanHelp(): string {
     "  uninstall   Remove aidlc from this machine",
     "",
     "EXAMPLES",
-    `  $ ${invoke} config                     guided setup in the current project`,
-    `  $ ${invoke} config models --show       see which model each agent uses, and why`,
-    `  $ ${invoke} doctor                     find out why something isn't working`,
+    `  ${invoke} config                     guided setup in the current project`,
+    `  ${invoke} config models --show       see which model each agent uses, and why`,
+    `  ${invoke} doctor                     find out why something isn't working`,
     "",
     "LEARN MORE",
     `  Use '${invoke} <command> --help' for more about a command.`,
@@ -1076,9 +1076,9 @@ export function renderCommandHelp(command: PublicCommand): string {
       "  --yes             Confirm explicit choices; it never chooses values",
       "",
       "EXAMPLES",
-      `  $ ${invoke} config`,
-      `  $ ${invoke} config models --show`,
-      `  $ ${invoke} config models --preset thorough --project --yes`,
+      `  ${invoke} config`,
+      `  ${invoke} config models --show`,
+      `  ${invoke} config models --preset thorough --project --yes`,
       "",
       "Every interactive question has an equivalent flag for non-interactive use.",
       `Full flag reference: ${invoke} config <section> --help`,
@@ -1093,10 +1093,10 @@ export function renderCommandHelp(command: PublicCommand): string {
     uninstall: "Remove aidlc from this machine",
   };
   const examples: Partial<Record<Exclude<PublicCommand, "config">, string[]>> = {
-    doctor: [`  $ ${invoke} doctor`, `  $ ${invoke} doctor --verbose`],
-    update: [`  $ ${invoke} update --check`, `  $ ${invoke} update --dry-run`],
-    use: [`  $ ${invoke} use 2.6.2`],
-    uninstall: [`  $ ${invoke} uninstall`, `  $ ${invoke} uninstall --purge`],
+    doctor: [`  ${invoke} doctor`, `  ${invoke} doctor --verbose`],
+    update: [`  ${invoke} update --check`, `  ${invoke} update --dry-run`],
+    use: [`  ${invoke} use 2.6.2`],
+    uninstall: [`  ${invoke} uninstall`, `  ${invoke} uninstall --purge`],
   };
   return [
     descriptions[command],
@@ -2266,6 +2266,13 @@ export async function main(argv: string[]): Promise<void> {
     (route?.routeOnly === "adapter" && withoutProjectDirFlag(argv)[2] !== "kiro-ide")
   ) {
     await readStdin();
+  }
+  if (
+    route?.id === "top-config" &&
+    process.env.AIDLC_TEST_CONFIG_TTY === "1" &&
+    !process.stdin.isTTY
+  ) {
+    process.env.AIDLC_TEST_CONFIG_INPUT = await readStdin();
   }
   const pinnedCode = await dispatchPinnedVersion(argv, bufferedStdin);
   if (pinnedCode !== null) {

@@ -25,7 +25,6 @@ import {
 } from "../../core/tools/aidlc-lib.ts";
 import {
   invalidateSettingsCache,
-  projectSettingsPath,
   resolveAidlcSettings,
 } from "../../core/tools/aidlc-settings.ts";
 
@@ -266,7 +265,7 @@ describe("t295 flags section", () => {
       join(project, ".claude", "settings.json"),
     );
     expect(payload.data.files.map((entry) => entry.file)).toContain(
-      projectSettingsPath(project),
+      "aidlc.settings.json",
     );
     expect(payload.data.record.bypasses).toEqual([
       "AIDLC_SKIP_ARTIFACT_GUARD",
@@ -322,6 +321,20 @@ describe("t295 flags section", () => {
     expect(
       JSON.parse(envFromOtherCwd.stdout).data.effective.AIDLC_USE_SWARM,
     ).toBe("0");
+    const envHuman = run([
+      "config",
+      "flags",
+      "--project-dir",
+      project,
+      "--show",
+    ], project, runtimeEnv({
+      AIDLC_USE_SWARM: "0",
+    }));
+    expect(envHuman.status).toBe(0);
+    expect(envHuman.stdout).toContain("Swarm: off [env]");
+    expect(envHuman.stdout).toContain(
+      "overrides the recorded answer on",
+    );
 
     const checkOverride = run([
       "config",

@@ -42,9 +42,10 @@ Pick your harness:
 AI-DLC on Kiro (IDE or CLI) works best with **Claude Opus 4.8**, which requires a **paid Kiro plan**.
 
 The committed `dist/<harness>/` trees remain a source/development alternative.
-That copy channel requires Git and Bun and does not use `aidlc config`; each
-harness chapter keeps its copy instructions under a clearly labeled
-alternative.
+That copy channel requires Git and Bun. Its projected config command may record
+guided policy and diagnostic answers without a native install; framework-file
+refresh still requires a native runtime or a fresh copy. Each harness chapter
+keeps its copy instructions under a clearly labeled alternative.
 
 After `aidlc update`, run `aidlc doctor` to see project/runtime version skew
 and refresh each project with `aidlc config` between workflows. Config refuses an

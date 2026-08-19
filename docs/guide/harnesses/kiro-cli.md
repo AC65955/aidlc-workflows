@@ -75,8 +75,9 @@ The `aidlc/` directory is the workspace shell — it ships the pre-built
 of `.kiro/`, so copy it separately (or copy the whole `dist/kiro/` tree at once).
 `/aidlc --doctor` fails its "workspace shell ready" check if it is missing.
 
-This source/development channel requires Git and Bun. It does not use
-`aidlc config`; the copied tree already contains the workspace shell.
+This source/development channel requires Git and Bun. The copied tree already
+contains the workspace shell; its projected config command may still record
+guided choices without a native install.
 
 The install ships `.kiro/settings/cli.json` with `chat.defaultAgent: "aidlc"`,
 so the AI-DLC conductor agent is active by default — `/aidlc` just works.

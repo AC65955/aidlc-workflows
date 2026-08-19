@@ -581,7 +581,9 @@ describe("t294 post-apply outstanding actions", () => {
     expect(applied.status, applied.stdout + applied.stderr).toBe(0);
     expect(applied.stdout).toContain("Outstanding actions:");
     expect(applied.stdout).toContain("aidlc is absent from the non-interactive hook PATH");
-    expect(applied.stdout).toContain("aidlc config runtime");
+    expect(applied.stdout).toContain(
+      "bun .claude/tools/aidlc.ts config runtime",
+    );
 
     const json = run([
       "config",
@@ -605,7 +607,7 @@ describe("t294 post-apply outstanding actions", () => {
     expect(payload.data.outstandingActions).toContainEqual(expect.objectContaining({
       section: "runtime",
       id: "runtime-aidlc-missing",
-      command: "aidlc config runtime",
+      command: "bun .claude/tools/aidlc.ts config runtime",
     }));
   }, 60_000);
 
@@ -630,7 +632,9 @@ describe("t294 post-apply outstanding actions", () => {
     ], project, env);
     expect(applied.status, applied.stdout + applied.stderr).toBe(0);
     expect(applied.stdout).toContain("codex-hook-trust-missing");
-    expect(applied.stdout).toContain("aidlc config trust");
+    expect(applied.stdout).toContain(
+      "bun .codex/tools/aidlc.ts config trust",
+    );
 
     const trustSection = run([
       "config",
@@ -687,7 +691,9 @@ describe("t294 post-apply outstanding actions", () => {
     ], project, env);
     expect(refreshed.status, refreshed.stdout + refreshed.stderr).toBe(0);
     expect(refreshed.stdout).toContain("bedrock-model-access");
-    expect(refreshed.stdout).toContain("aidlc config providers --check");
+    expect(refreshed.stdout).toContain(
+      "bun .claude/tools/aidlc.ts config providers --check",
+    );
 
     const actions = postApplyOutstandingActions(
       project,
@@ -723,7 +729,8 @@ describe("t294 instruction-file doctor row", () => {
     const missing = instructionFileDoctorCheck(project, ".kiro");
     expect(missing.pass).toBe(false);
     expect(missing.severity).toBe("warn");
-    expect(missing.label).toContain("missing - run `aidlc config`");
+    expect(missing.label).toContain("block or file missing (AGENTS.md)");
+    expect(missing.fix).toContain("bun .kiro/tools/aidlc.ts config");
 
     writeFileSync(
       path,
@@ -747,8 +754,9 @@ describe("t294 instruction-file doctor row", () => {
     expect(intact.label).toContain("framework-owned file intact");
 
     rmSync(path);
-    expect(instructionFileDoctorCheck(project, ".aidlc").label)
-      .toContain("missing - run `aidlc config`");
+    const missing = instructionFileDoctorCheck(project, ".aidlc");
+    expect(missing.label).toContain("block or file missing (opencode.json)");
+    expect(missing.fix).toContain("bun .aidlc/tools/aidlc.ts config");
 
     writeFileSync(path, original.replace('"permission"', '"localSetting": true,\n  "permission"'));
     expect(instructionFileDoctorCheck(project, ".aidlc").label)

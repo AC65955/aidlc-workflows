@@ -35,6 +35,7 @@ import {
 } from "./aidlc-distribution.ts";
 import {
   activeVersion,
+  binRoot,
   machineTransactionRoot,
   projectDirFrom,
   runtimeRoot,
@@ -418,7 +419,7 @@ function settingsTargetForMutation(
       "settings mutation requires exactly one of --local, --project, or --global; use --project for team-shared repository policy",
     );
   }
-  const answer = prompt(
+  const answer = configPrompt(
     "Record settings in [project recommended/local/global]:",
   )?.trim().toLowerCase();
   if (!answer || answer === "project") return "project";
@@ -604,12 +605,16 @@ function showModels(
     file.present &&
     readSettingsTarget(projectDir, target)?.models !== undefined
   ).map(([, file]) => file.path);
+  const displayedRecorded = recorded.map((path) => {
+    const rel = relative(projectDir, path).replaceAll("\\", "/");
+    return rel && !rel.startsWith("../") ? rel : path;
+  });
   output += `\nRecorded in: ${
-    recorded.length > 0
-      ? recorded.join(", ")
-      : "nothing yet - run 'aidlc config models --preset balanced --project --yes'"
+    displayedRecorded.length > 0
+      ? displayedRecorded.join(", ")
+      : `nothing yet - run '${aidlcInvocation()} config models --preset balanced --project --yes'`
   }\n`;
-  output += "Full per-agent list: aidlc config models --show --json\n";
+  output += `Full per-agent list: ${aidlcInvocation()} config models --show --json\n`;
   process.stdout.write(output);
   process.exitCode = EXIT.ok;
 }
@@ -812,7 +817,7 @@ function modelsWizard(
   process.stdout.write(
     "Pins bind in both directions, and shipped tiers never raise an agent above the session.\n",
   );
-  const choice = prompt(
+  const choice = configPrompt(
     "Models [Enter keep everything, 1 preset, 2 group efforts, 3 set each one myself]:",
   )?.trim();
   if (!choice) return current;
@@ -820,7 +825,7 @@ function modelsWizard(
     process.stdout.write(
       "Presets: thorough raises reviewing to xhigh; balanced matches the shipped reviewing default; minimal also lowers Writing up to low.\n",
     );
-    const selected = prompt("Preset [thorough/balanced/minimal]:")?.trim() ?? "";
+    const selected = configPrompt("Preset [thorough/balanced/minimal]:")?.trim() ?? "";
     if (!isModelPreset(selected)) throw new Error("preset selection cancelled");
     return applyModelsFlags(targetCurrent, ["--preset", selected], tiers, current);
   }
@@ -831,7 +836,7 @@ function modelsWizard(
       process.stdout.write(
         `${MODEL_GROUPS[group].label}: current ${currentValue}. ${MODEL_GROUPS[group].tradeoff}\n`,
       );
-      const answer = prompt(
+      const answer = configPrompt(
         `${MODEL_GROUPS[group].label} effort [low/medium/high/xhigh/max, Enter keep]:`,
       )?.trim();
       if (!answer) continue;
@@ -849,12 +854,12 @@ function modelsWizard(
       process.stdout.write(
         `${name}: current ${currentValue.model ?? "inherit"}/${currentValue.effort ?? "inherit"}.\n`,
       );
-      const effort = prompt(
+      const effort = configPrompt(
         `${name} effort [low/medium/high/xhigh/max, Enter keep]:`,
       )?.trim();
       if (!effort) continue;
       if (!isModelEffort(effort)) throw new Error(`invalid effort ${JSON.stringify(effort)}`);
-      const model = prompt(`${name} raw model id [Enter inherit]:`)?.trim();
+      const model = configPrompt(`${name} raw model id [Enter inherit]:`)?.trim();
       next = applyModelsFlags(
         next,
         ["--agent", name, "--effort", effort, ...(model ? ["--model", model] : [])],
@@ -985,7 +990,7 @@ function selectedDiagnosticHarness(
     throw new Error(
       requested && harnesses.length > 0
         ? `project uses ${harnesses.map((item) => item.distribution).join(", ")}; refusing ${requested}`
-        : `aidlc config ${section} requires an installed project harness; run aidlc config first`,
+        : `${configCommand(section)} requires an installed project harness; run ${configCommand()} first`,
     );
   }
   if (!requested && harnesses.length > 1) {
@@ -1202,7 +1207,7 @@ function checkDiagnosticSection(
             issues.map((issue) => `${issue.id} (${issue.message})`).join("; ")
           }`,
           EXIT.failure,
-          `aidlc config ${section} --show`,
+          configCommand(`${section} --show`),
         ),
     options,
   );
@@ -1319,7 +1324,9 @@ function diagnosticWizard(
         process.stdout.write(`    ${issue.remediation}\n`);
       }
       process.stdout.write(
-        "\n  Full diagnostics: aidlc config runtime --show\n\n",
+        `\n  Full diagnostics: ${
+          configCommandForHarness(selected.harnessDir, "runtime --show")
+        }\n\n`,
       );
       return records.runtime;
     }
@@ -1340,7 +1347,9 @@ function diagnosticWizard(
     process.stdout.write("\n  Model provider\n");
     process.stdout.write(
       credentials.hasCredentials
-        ? `  Found AWS credentials (${detected.source}); detected region ${detected.region}.\n`
+        ? `  Found AWS credentials (${detected.source}); ${
+            detected.regionSource === "detected" ? "detected" : "fallback"
+          } region ${detected.region}.\n`
         : "  No AWS credentials were detected.\n",
     );
     process.stdout.write(`    1. amazon-bedrock   ${
@@ -1407,7 +1416,14 @@ function diagnosticWizard(
         "  Manual provider setup complete?",
         false,
       );
-      if (acknowledged) args.push("--acknowledge");
+      if (acknowledged) {
+        args.push("--acknowledge");
+      } else {
+        process.stdout.write(
+          "  Provider setup remains pending; no provider answer was recorded.\n\n",
+        );
+        return records.providers;
+      }
     }
     let next = providerRecordFromArgs(records.providers, args, selected);
     for (const action of next.pendingActions ?? []) {
@@ -1509,6 +1525,36 @@ function configInputIsTty(): boolean {
     process.stdin.isTTY ||
     process.env.AIDLC_TEST_CONFIG_TTY === "1",
   );
+}
+
+function configCommand(args = ""): string {
+  return `${aidlcInvocation()} config${args ? ` ${args}` : ""}`;
+}
+
+function configCommandForHarness(harnessDir: string, args = ""): string {
+  const invoke = aidlcInvocation() === "aidlc"
+    ? "aidlc"
+    : `bun ${harnessDir}/tools/aidlc.ts`;
+  return `${invoke} config${args ? ` ${args}` : ""}`;
+}
+
+let scriptedPromptAnswers: string[] | null = null;
+
+function configPrompt(label: string): string | null {
+  if (
+    process.env.AIDLC_TEST_CONFIG_TTY === "1" &&
+    !process.stdin.isTTY
+  ) {
+    if (scriptedPromptAnswers === null) {
+      const scripted = process.env.AIDLC_TEST_CONFIG_INPUT ??
+        readFileSync(0, "utf-8");
+      scriptedPromptAnswers = scripted.split(/\r?\n/);
+      if (scriptedPromptAnswers.at(-1) === "") scriptedPromptAnswers.pop();
+    }
+    process.stdout.write(`${label} `);
+    return scriptedPromptAnswers.shift() ?? null;
+  }
+  return prompt(label);
 }
 
 type SetupMapRow = {
@@ -1643,13 +1689,42 @@ function renderSetupLedger(
   }
 }
 
+function setupLedgerActions(
+  projectDir: string,
+  harnessDir: string,
+  actions: readonly ConfigOutstandingAction[],
+): ConfigOutstandingAction[] {
+  const next = [...actions];
+  if (next.some((action) => action.section === "providers")) return next;
+  try {
+    const record = readConfigDiagnosticRecords(
+      join(projectDir, harnessDir),
+    ).providers;
+    if (record === null) {
+      next.push({
+        section: "providers",
+        id: "provider-record-missing",
+        message: "Choose and configure a model provider, then record the completed setup.",
+        command: configCommandForHarness(harnessDir, "providers"),
+      });
+    }
+  } catch {
+    // The shared outstanding-action collector already reports unreadable data.
+  }
+  return next;
+}
+
 async function runSetupWalk(
   projectDir: string,
   harnessDir: string,
   distribution: string,
-  sourceRoot: string,
   initialOutstanding: readonly ConfigOutstandingAction[],
 ): Promise<void> {
+  const initialLedger = setupLedgerActions(
+    projectDir,
+    harnessDir,
+    initialOutstanding,
+  );
   const flagged = renderSetupMap(
     setupMapRows(
       projectDir,
@@ -1659,8 +1734,8 @@ async function runSetupWalk(
     ),
   );
   if (flagged.length === 0) {
-    if (initialOutstanding.length > 0) {
-      renderSetupLedger(initialOutstanding);
+    if (initialLedger.length > 0) {
+      renderSetupLedger(initialLedger);
     }
     return;
   }
@@ -1669,7 +1744,7 @@ async function runSetupWalk(
     true,
   );
   if (!answer) {
-    renderSetupLedger(initialOutstanding);
+    renderSetupLedger(initialLedger);
     return;
   }
   for (const section of flagged) {
@@ -1685,15 +1760,25 @@ async function runSetupWalk(
       ],
       {
         setupWalkChild: true,
-        sourceRoot,
       },
     );
-    if ((process.exitCode ?? EXIT.ok) !== EXIT.ok) break;
+    if ((process.exitCode ?? EXIT.ok) !== EXIT.ok) {
+      process.stdout.write(
+        `\n  Setup stopped while configuring ${section}. Completed answers remain recorded; rerun ${
+          configCommandForHarness(harnessDir)
+        } to continue.\n`,
+      );
+      return;
+    }
   }
-  const remaining = postApplyOutstandingActions(
+  const remaining = setupLedgerActions(
     projectDir,
     harnessDir,
-    modelHarness(distribution),
+    postApplyOutstandingActions(
+      projectDir,
+      harnessDir,
+      modelHarness(distribution),
+    ),
   );
   renderSetupLedger(remaining);
 }
@@ -1705,7 +1790,7 @@ function prepareDiagnosticSection(
 ): { argv: string[]; context: DiagnosticsMutationContext } | null {
   const validation = validateDiagnosticArgs(section, argv);
   if (validation) {
-    emitResult(usage(validation, `aidlc config ${section} --help`), options);
+    emitResult(usage(validation, configCommand(`${section} --help`)), options);
     return null;
   }
   if (argv.includes("--help")) {
@@ -1779,7 +1864,7 @@ function prepareDiagnosticSection(
       emitResult(
         usage(
           `non-interactive ${section} configuration requires ${flags}; --yes confirms but never chooses`,
-          `aidlc config ${section} --help`,
+          configCommand(`${section} --help`),
         ),
         options,
       );
@@ -1802,7 +1887,7 @@ function prepareDiagnosticSection(
       );
       return null;
     }
-    const answer = prompt(`Apply ${section} configuration changes? [y/N]:`);
+    const answer = configPrompt(`Apply ${section} configuration changes? [y/N]:`);
     if (!answer || !/^y(?:es)?$/i.test(answer.trim())) {
       emitResult(usage(`${section} configuration change cancelled`), options);
       return null;
@@ -2165,28 +2250,52 @@ function showChoiceSection(
   let output = `${section[0].toUpperCase()}${section.slice(1)} configuration for ${selected.harness}\n`;
   if (section === "flags") {
     const sources = data.sources as Record<string, string>;
-    output += `  Default scope: ${resolved.flags?.defaultScope ?? "inherit"} [${
+    const effective = data.effective as Record<string, string | undefined>;
+    const effectiveBoolean = (
+      envName: string,
+      recorded: boolean | undefined,
+    ): string => {
+      if (sources[envName] !== "env") {
+        return recorded === undefined ? "inherit" : recorded ? "on" : "off";
+      }
+      const value = effective[envName]?.trim().toLowerCase();
+      return value === undefined
+        ? "inherit"
+        : ["", "0", "false", "no", "off"].includes(value)
+        ? "off"
+        : "on";
+    };
+    output += `  Default scope: ${
+      sources.AWS_AIDLC_DEFAULT_SCOPE === "env"
+        ? effective.AWS_AIDLC_DEFAULT_SCOPE ?? "inherit"
+        : resolved.flags?.defaultScope ?? "inherit"
+    } [${
       sources.AWS_AIDLC_DEFAULT_SCOPE
     }]\n`;
-    output += `  Swarm: ${
-      resolved.flags?.swarm === undefined ? "inherit" : resolved.flags.swarm ? "on" : "off"
-    } [${sources.AIDLC_USE_SWARM}]\n`;
+    output += `  Swarm: ${effectiveBoolean("AIDLC_USE_SWARM", resolved.flags?.swarm)} [${
+      sources.AIDLC_USE_SWARM
+    }]\n`;
     output += `  Hook debug: ${
-      resolved.flags?.hookDebug === undefined
-        ? "inherit"
-        : resolved.flags.hookDebug
-        ? "on"
-        : "off"
+      effectiveBoolean("AIDLC_HOOK_DEBUG", resolved.flags?.hookDebug)
     } [${sources.AIDLC_HOOK_DEBUG}]\n`;
-    output += `  Sensor timeout: ${resolved.flags?.sensorTimeoutMs ?? "inherit"} [${
+    output += `  Sensor timeout: ${
+      sources.AIDLC_SENSOR_TIMEOUT_MS === "env"
+        ? effective.AIDLC_SENSOR_TIMEOUT_MS ?? "inherit"
+        : resolved.flags?.sensorTimeoutMs ?? "inherit"
+    } [${
       sources.AIDLC_SENSOR_TIMEOUT_MS
     }]\n`;
     for (const bypass of resolved.flags?.bypasses ?? []) {
       output += `  Bypass enabled: ${bypass} [${sources[bypass]}]\n`;
     }
-    output += "  Files carrying flags:\n";
-    for (const entry of data.files as ReturnType<typeof flagFiles>) {
-      output += `    ${entry.setting}: ${entry.file}\n`;
+    const files = data.files as ReturnType<typeof flagFiles>;
+    if (files.length === 0) {
+      output += "  Files carrying flags: none\n";
+    } else {
+      output += "  Files carrying flags:\n";
+      for (const entry of files) {
+        output += `    ${entry.setting}: ${entry.file}\n`;
+      }
     }
     for (const issue of data.issues as ReturnType<typeof flagIssues>) {
       output += `  Override: ${issue.message}\n`;
@@ -2243,7 +2352,7 @@ function checkChoiceSection(
             issues.map((issue) => `${issue.id} (${issue.message})`).join("; ")
           }`,
           EXIT.failure,
-          `aidlc config ${section} --show`,
+          configCommand(`${section} --show`),
         ),
     options,
   );
@@ -2268,7 +2377,7 @@ function choiceWizard(
   if (section === "flags") {
     const args: string[] = [];
     const scopes = availableScopeNames(selected.root);
-    const scope = prompt(
+    const scope = configPrompt(
       `Default scope [${scopes.join("/")}, Enter keep]:`,
     )?.trim();
     if (scope) args.push("--default-scope", scope);
@@ -2276,10 +2385,10 @@ function choiceWizard(
       ["--swarm", "Swarm"],
       ["--hook-debug", "Hook debug"],
     ] as const) {
-      const answer = prompt(`${label} [on/off, Enter keep]:`)?.trim();
+      const answer = configPrompt(`${label} [on/off, Enter keep]:`)?.trim();
       if (answer) args.push(flag, answer);
     }
-    const timeout = prompt("Sensor timeout ms [Enter keep]:")?.trim();
+    const timeout = configPrompt("Sensor timeout ms [Enter keep]:")?.trim();
     if (timeout) args.push("--sensor-timeout-ms", timeout);
     return {
       next: buildFlagsRecord(targetCurrentFlags, args, selected.root),
@@ -2289,14 +2398,14 @@ function choiceWizard(
   const known = discoverInstalledPluginNames(projectDir, selected.harnessDir);
   const currentPlugins = readPluginSelection(selected.root);
   const args: string[] = [];
-  const pluginAnswer = prompt(
+  const pluginAnswer = configPrompt(
     `Enabled plugins [${known.join(",")}; all; Enter keep]:`,
   )?.trim();
   if (pluginAnswer) args.push("--plugins", pluginAnswer);
   const currentMcp = records.project?.mcp ?? "none";
-  const mcp = prompt(`MCP consent [defaults/none, Enter ${currentMcp}]:`)?.trim();
+  const mcp = configPrompt(`MCP consent [defaults/none, Enter ${currentMcp}]:`)?.trim();
   if (mcp) args.push("--mcp", mcp);
-  const completions = prompt(
+  const completions = configPrompt(
     "Completions [bash/zsh/fish/powershell/none, Enter keep]:",
   )?.trim();
   if (completions) args.push("--completions", completions);
@@ -2354,7 +2463,7 @@ function prepareChoiceSection(
 ): { argv: string[]; context: ChoicesMutationContext } | null {
   const validation = validateChoiceArgs(section, argv);
   if (validation) {
-    emitResult(usage(validation, `aidlc config ${section} --help`), options);
+    emitResult(usage(validation, configCommand(`${section} --help`)), options);
     return null;
   }
   if (argv.includes("--help")) {
@@ -2447,7 +2556,7 @@ function prepareChoiceSection(
       emitResult(
         usage(
           `non-interactive ${section} configuration requires ${flags}; --yes confirms but never chooses`,
-          `aidlc config ${section} --help`,
+          configCommand(`${section} --help`),
         ),
         options,
       );
@@ -2509,7 +2618,7 @@ function prepareChoiceSection(
       );
       return null;
     }
-    const answer = prompt(`Apply ${section} configuration changes? [y/N]:`);
+    const answer = configPrompt(`Apply ${section} configuration changes? [y/N]:`);
     if (!answer || !/^y(?:es)?$/i.test(answer.trim())) {
       emitResult(usage(`${section} configuration change cancelled`), options);
       return null;
@@ -2957,6 +3066,21 @@ function prepareRefreshSource(
   cpSync(sourceRoot, root, { recursive: true, preserveTimestamps: true });
   const regenerated = new Set<string>();
   const stagedHarness = join(root, descriptor.harnessDir);
+  const beforeGeneratedWrites = new Map<string, string>();
+  for (const directory of descriptor.managedDirectories) {
+    const stagedDirectory = join(root, directory);
+    if (!existsSync(stagedDirectory) || !lstatSync(stagedDirectory).isDirectory()) continue;
+    for (const nested of walkFiles(stagedDirectory)) {
+      const rel = join(directory, nested).replaceAll("\\", "/");
+      beforeGeneratedWrites.set(rel, sha256File(join(root, rel)));
+    }
+  }
+  for (const integration of descriptor.rootIntegrations) {
+    const path = join(root, integration.path);
+    if (regularFile(path)) {
+      beforeGeneratedWrites.set(integration.path, sha256File(path));
+    }
+  }
 
   const stagedHarnessData = join(stagedHarness, "tools", "data", "harness.json");
   const staged = JSON.parse(readFileSync(stagedHarnessData, "utf-8")) as Record<string, unknown>;
@@ -2965,7 +3089,9 @@ function prepareRefreshSource(
     const policyKeys = ["models", "flags"].filter((key) => Object.hasOwn(current, key));
     if (policyKeys.length > 0) {
       throw new Error(
-        `${currentHarnessData}: harness.json contains policy key(s) ${policyKeys.join(", ")}; use aidlc.settings.json`,
+        `${currentHarnessData}: harness.json contains legacy policy key(s) ${policyKeys.join(", ")}. ` +
+          `Remove ${policyKeys.join(", ")} from ${currentHarnessData}, then run ` +
+          `'${aidlcInvocation()} config' to record policy in aidlc.settings.json.`,
       );
     }
     for (const [key, value] of Object.entries(current)) {
@@ -3018,6 +3144,25 @@ function prepareRefreshSource(
       project: normalizeProjectChoicesRecord(staged.project),
     },
   );
+  for (const directory of descriptor.managedDirectories) {
+    const stagedDirectory = join(root, directory);
+    if (!existsSync(stagedDirectory) || !lstatSync(stagedDirectory).isDirectory()) continue;
+    for (const nested of walkFiles(stagedDirectory)) {
+      const rel = join(directory, nested).replaceAll("\\", "/");
+      if (beforeGeneratedWrites.get(rel) !== sha256File(join(root, rel))) {
+        regenerated.add(rel);
+      }
+    }
+  }
+  for (const integration of descriptor.rootIntegrations) {
+    const path = join(root, integration.path);
+    if (
+      regularFile(path) &&
+      beforeGeneratedWrites.get(integration.path) !== sha256File(path)
+    ) {
+      regenerated.add(integration.path);
+    }
+  }
 
   const currentGrid = join(currentHarness, "tools", "data", "scope-grid.json");
   const stagedGrid = join(stagedHarness, "tools", "data", "scope-grid.json");
@@ -3322,6 +3467,14 @@ type InstalledSourceCandidate = {
   descriptor: ReturnType<typeof projectionFiles>["descriptor"];
 };
 
+type ConfigSource = {
+  root: string;
+  cleanup?: string;
+  stamp: ReturnType<typeof projectionFiles>["stamp"];
+  descriptor: ReturnType<typeof projectionFiles>["descriptor"];
+  projectProjection?: boolean;
+};
+
 function installedSourceCandidates(
   requiredVersion?: string,
 ): InstalledSourceCandidate[] {
@@ -3345,10 +3498,10 @@ function selectSource(
   from: string | undefined,
   existingDistribution: string | undefined,
   requiredVersion?: string,
-): { root: string; cleanup?: string } {
+): ConfigSource {
   if (from) {
     const source = materializeSource(from);
-    const { stamp } = projectionFiles(source.root);
+    const { stamp, descriptor } = projectionFiles(source.root);
     if (requested && stamp.distribution !== requested) {
       if (source.cleanup) rmSync(source.cleanup, { recursive: true, force: true });
       throw new Error(`source is ${stamp.distribution}, not requested harness ${requested}`);
@@ -3357,7 +3510,7 @@ function selectSource(
       if (source.cleanup) rmSync(source.cleanup, { recursive: true, force: true });
       throw new Error(`existing project uses ${existingDistribution}; refusing ${stamp.distribution}`);
     }
-    return source;
+    return { ...source, stamp, descriptor };
   }
   const candidates = installedSourceCandidates(requiredVersion);
   const selectedName = existingDistribution || requested;
@@ -3366,7 +3519,7 @@ function selectSource(
     const selected = versionFiltered.filter((candidate) =>
       candidate.stamp.distribution === selectedName
     );
-    if (selected.length === 1) return { root: selected[0].root };
+    if (selected.length === 1) return selected[0];
     throw new Error(
       requiredVersion && versionFiltered.length === 0
         ? `project requires ${requiredVersion}, which is not installed; run aidlc config --pin ${requiredVersion}`
@@ -3380,7 +3533,7 @@ function selectSource(
     const selected = versionFiltered.filter((candidate) =>
       candidate.stamp.distribution === configuredDefault
     );
-    if (selected.length === 1) return { root: selected[0].root };
+    if (selected.length === 1) return selected[0];
     if (versionFiltered.length > 0) {
       throw new Error(
         requiredVersion
@@ -3389,7 +3542,7 @@ function selectSource(
       );
     }
   }
-  if (versionFiltered.length === 1) return { root: versionFiltered[0].root };
+  if (versionFiltered.length === 1) return versionFiltered[0];
   if (versionFiltered.length === 0) {
     throw new Error(
       requiredVersion
@@ -3408,7 +3561,7 @@ function selectSource(
       promptChoice("Harness", versionFiltered.length) - 1
     ];
     process.stdout.write(`Using ${selected.descriptor.productName}.\n`);
-    return { root: selected.root };
+    return selected;
   }
   throw new Error(
     `multiple harnesses are installed; pass --harness <${
@@ -3417,8 +3570,78 @@ function selectSource(
   );
 }
 
+function copiedProjectSource(
+  projectDir: string,
+  requested?: string,
+): ConfigSource {
+  const harnesses = discoverProjectHarnesses(projectDir);
+  const selected = requested
+    ? harnesses.find((candidate) => candidate.distribution === requested)
+    : harnesses[0];
+  if (!selected) {
+    throw new Error("the project does not contain a copied AI-DLC projection");
+  }
+  if (!requested && harnesses.length > 1) {
+    throw new Error("multiple project harnesses are present; pass one --harness <name>");
+  }
+  const dataDir = join(selected.root, "tools", "data");
+  const stamp = JSON.parse(
+    readFileSync(join(dataDir, "aidlc-stamp.json"), "utf-8"),
+  ) as ReturnType<typeof projectionFiles>["stamp"];
+  const descriptor = JSON.parse(
+    readFileSync(join(dataDir, "aidlc-projection.json"), "utf-8"),
+  ) as ReturnType<typeof projectionFiles>["descriptor"];
+  if (
+    stamp.schemaVersion !== 1 ||
+    descriptor.schemaVersion !== 1 ||
+    stamp.distribution !== selected.distribution ||
+    descriptor.distribution !== selected.distribution ||
+    stamp.harnessDir !== selected.harnessDir ||
+    descriptor.harnessDir !== selected.harnessDir
+  ) {
+    throw new Error(`${dataDir}: copied projection identity is inconsistent`);
+  }
+  const cleanup = mkdtempSync(join(tmpdir(), "aidlc-config-copy-source-"));
+  const root = join(cleanup, "projection");
+  mkdirSync(root, { recursive: true });
+  for (const directory of descriptor.managedDirectories) {
+    const source = join(projectDir, directory);
+    if (!existsSync(source) || !lstatSync(source).isDirectory()) {
+      rmSync(cleanup, { recursive: true, force: true });
+      throw new Error(`copied projection is missing managed directory ${directory}`);
+    }
+    cpSync(source, join(root, directory), {
+      recursive: true,
+      preserveTimestamps: true,
+    });
+  }
+  for (const integration of descriptor.rootIntegrations) {
+    const source = join(projectDir, integration.path);
+    if (!existsSync(source) || !lstatSync(source).isFile()) continue;
+    const target = join(root, integration.path);
+    mkdirSync(dirname(target), { recursive: true });
+    cpSync(source, target, { preserveTimestamps: true });
+  }
+  rmSync(
+    join(root, selected.harnessDir, "tools", "data", "aidlc-manifest.json"),
+    { force: true },
+  );
+  return {
+    root,
+    cleanup,
+    stamp,
+    descriptor,
+    projectProjection: true,
+  };
+}
+
 type FirstRunDetection = {
-  harnesses: Record<string, { found: boolean; version?: string; path?: string }>;
+  harnesses: Record<string, {
+    found: boolean;
+    probed?: boolean;
+    version?: string;
+    path?: string;
+  }>;
   aws: ReturnType<typeof detectAwsCredentials>;
   runtimeIssues: ReturnType<typeof runtimeIssues>;
   bedrockReachable?: boolean;
@@ -3440,7 +3663,8 @@ type FirstRunChoices = {
 class FirstRunCancelled extends Error {}
 
 function firstRunPromptValue(value: string | null): string {
-  const normalized = value?.trim() ?? "";
+  if (value === null) throw new FirstRunCancelled();
+  const normalized = value.trim();
   if (normalized.includes("\u0003")) throw new FirstRunCancelled();
   return normalized;
 }
@@ -3454,7 +3678,7 @@ function promptChoice(
     const suffix = defaultIndex === undefined
       ? ` [1-${count}]`
       : ` [${defaultIndex}]`;
-    const value = firstRunPromptValue(prompt(`${label}${suffix}:`));
+    const value = firstRunPromptValue(configPrompt(`${label}${suffix}:`));
     if (!value && defaultIndex !== undefined) return defaultIndex;
     if (/^\d+$/.test(value)) {
       const selected = Number(value);
@@ -3469,13 +3693,13 @@ function promptChoice(
 }
 
 function promptTextDefault(label: string, fallback: string): string {
-  return firstRunPromptValue(prompt(`${label} [${fallback}]:`)) || fallback;
+  return firstRunPromptValue(configPrompt(`${label} [${fallback}]:`)) || fallback;
 }
 
 function promptYesDefault(label: string, defaultYes = true): boolean {
   while (true) {
     const value = firstRunPromptValue(
-      prompt(`${label} [${defaultYes ? "Y/n" : "y/N"}]:`),
+      configPrompt(`${label} [${defaultYes ? "Y/n" : "y/N"}]:`),
     ).toLowerCase();
     if (!value) return defaultYes;
     if (value === "y" || value === "yes") return true;
@@ -3505,6 +3729,7 @@ function detectFirstRun(
     const probe = probeHarnessCli(modelHarness(candidate.stamp.distribution));
     harnesses[candidate.stamp.distribution] = {
       found: probe.status === "found",
+      probed: probe.status !== "not-applicable",
       ...(probe.version ? { version: probe.version } : {}),
       ...(probe.path ? { path: probe.path } : {}),
     };
@@ -3546,6 +3771,7 @@ function renderHarnessChoices(
     const detected = detection.harnesses[candidate.stamp.distribution];
     const tags = [
       ...(detected?.found ? ["detected"] : []),
+      ...(!detected?.found && detected?.probed === false ? ["not probed"] : []),
       ...(candidate.stamp.distribution === defaultDistribution ? ["default"] : []),
     ];
     process.stdout.write(
@@ -3580,10 +3806,12 @@ function chooseHarness(
 function awsSummary(credentials: ReturnType<typeof detectAwsCredentials>): {
   source: string;
   region: string;
+  regionSource: "detected" | "fallback";
 } {
   return {
     source: credentials.sources[0] ?? "default credential chain",
     region: credentials.regions[0] ?? "us-east-1",
+    regionSource: credentials.regions.length > 0 ? "detected" : "fallback",
   };
 }
 
@@ -3635,6 +3863,20 @@ function firstRunSettingsTargetLabel(target: SettingsTarget): string {
     : target === "local"
     ? "this project, just for you"
     : "this machine";
+}
+
+export function firstRunPathRemediation(
+  platform: NodeJS.Platform,
+  directory: string,
+): string[] {
+  return platform === "win32"
+    ? [
+        `Add ${directory} to your User PATH in Windows Settings, then open a new terminal.`,
+      ]
+    : [
+        "Add this line to ~/.profile, then open a new shell:",
+        '    export PATH="$HOME/.local/bin:$PATH"',
+      ];
 }
 
 function applyFirstRunChoices(
@@ -3690,11 +3932,9 @@ function applyFirstRunChoices(
     if (choices.providerVerified) {
       providerArgs.push("--mark-done", "bedrock-model-access");
     }
-  } else {
-    providerArgs.push("--acknowledge");
+    providerArgs.push("--yes", "--json");
+    runConfigChild(providerArgs, projectDir);
   }
-  providerArgs.push("--yes", "--json");
-  runConfigChild(providerArgs, projectDir);
 }
 
 function renderFirstRunEnding(
@@ -3729,6 +3969,20 @@ function renderFirstRunEnding(
     choices.candidate.descriptor.harnessDir,
     modelHarness(choices.candidate.stamp.distribution),
   );
+  if (
+    choices.provider === "other" &&
+    !remaining.some((action) => action.section === "providers")
+  ) {
+    remaining.push({
+      section: "providers",
+      id: "provider-manual-setup",
+      message: "Choose and configure a model provider, then acknowledge the completed setup.",
+      command: configCommandForHarness(
+        choices.candidate.descriptor.harnessDir,
+        "providers",
+      ),
+    });
+  }
   if (remaining.length > 0) {
     process.stdout.write(
       `\n  ${remaining.length === 1 ? "One thing needs you" : `${remaining.length} things need you`} - ${
@@ -3738,12 +3992,19 @@ function renderFirstRunEnding(
     for (const action of remaining) {
       if (action.id === "runtime-aidlc-missing") {
         process.stdout.write(
-          "    Hooks run outside your shell profile, and aidlc isn't on that PATH.\n",
+          "    Hooks run outside your interactive shell PATH, and aidlc is not available there.\n",
         );
-        process.stdout.write("    Add this line to ~/.profile, then open a new shell:\n\n");
-        process.stdout.write('        export PATH="$HOME/.local/bin:$PATH"\n\n');
+        for (const line of firstRunPathRemediation(process.platform, binRoot())) {
+          process.stdout.write(`    ${line}\n`);
+        }
+        process.stdout.write("\n");
         process.stdout.write(
-          "    Full diagnostics: aidlc config runtime --show\n\n",
+          `    Full diagnostics: ${
+            configCommandForHarness(
+              choices.candidate.descriptor.harnessDir,
+              "runtime --show",
+            )
+          }\n\n`,
         );
         continue;
       }
@@ -3802,7 +4063,9 @@ function customizeFirstRun(
       process.stdout.write("  Step 2 of 6 - Model provider\n");
       process.stdout.write(
         detection.aws.hasCredentials
-          ? `  Found AWS credentials (${aws.source}); detected region ${aws.region}.\n`
+          ? `  Found AWS credentials (${aws.source}); ${
+              aws.regionSource === "detected" ? "detected" : "fallback"
+            } region ${aws.region}.\n`
           : "  No AWS credentials were detected.\n",
       );
       process.stdout.write(`    1. amazon-bedrock   ${
@@ -3904,7 +4167,7 @@ function customizeFirstRun(
     process.stdout.write(`    4. Plugins      ${choices.pluginLabel}\n`);
     process.stdout.write(`    5. MCP          ${choices.mcp === "defaults" ? "on" : "off"}\n`);
     process.stdout.write(`    6. Record in    ${firstRunSettingsTargetLabel(choices.target)}\n`);
-    const value = firstRunPromptValue(prompt("  Apply? [Y/n]:")).toLowerCase();
+    const value = firstRunPromptValue(configPrompt("  Apply? [Y/n]:")).toLowerCase();
     if (!value || value === "y" || value === "yes") return choices;
     if (value === "n" || value === "no") {
       process.stdout.write("\n  Nothing written.\n");
@@ -3940,10 +4203,20 @@ async function runFirstRunWizard(projectDir: string): Promise<boolean> {
   process.stdout.write("\n  AI-DLC setup - first run in this project.\n\n");
   process.stdout.write("  Checked your machine and this repo:\n\n");
   const harnessDetection = detection.harnesses[candidate.stamp.distribution];
+  const displayedVersion = harnessDetection?.version
+    ? /\d+\.\d+\.\d+(?:[-+][^\s)]+)?/.exec(harnessDetection.version)?.[0] ??
+      harnessDetection.version
+    : undefined;
   process.stdout.write(
     `    Harness    ${candidate.descriptor.productName} ${
       harnessDetection?.found ? "detected" : "selected"
-    }${harnessDetection?.version ? `  (${harnessDetection.version} on your PATH)` : ""}\n`,
+    }${
+      displayedVersion
+        ? `  (${displayedVersion} on your PATH)`
+        : harnessDetection?.probed === false
+        ? "  (CLI not probed)"
+        : ""
+    }\n`,
   );
   process.stdout.write(
     `    Project    ${
@@ -3953,7 +4226,9 @@ async function runFirstRunWizard(projectDir: string): Promise<boolean> {
   process.stdout.write(
     `    AWS        ${
       detection.aws.hasCredentials
-        ? `credentials found  (${aws.source}, region ${aws.region})`
+        ? `credentials found  (${aws.source}, ${
+            aws.regionSource === "detected" ? "detected" : "fallback"
+          } region ${aws.region})`
         : "credentials not found"
     }\n`,
   );
@@ -3972,7 +4247,11 @@ async function runFirstRunWizard(projectDir: string): Promise<boolean> {
   process.stdout.write(
     `    1. Yes, use recommended defaults   ${
       candidate.stamp.distribution === "claude" ? "MCP servers on, " : ""
-    }all plugins, Bedrock via your AWS credentials\n`,
+    }all plugins, ${
+      detection.aws.hasCredentials
+        ? "Bedrock via your AWS credentials"
+        : "provider recorded as other; manual provider setup remains"
+    }\n`,
   );
   process.stdout.write(
     "    2. No, customize step by step      harness, provider, preset, plugins, MCP, record layer\n",
@@ -3987,7 +4266,7 @@ async function runFirstRunWizard(projectDir: string): Promise<boolean> {
   if (selected === 1) {
     choices = {
       candidate,
-      provider: "amazon-bedrock",
+      provider: detection.aws.hasCredentials ? "amazon-bedrock" : "other",
       region: aws.region,
       profile: "",
       preset: "balanced",
@@ -4015,6 +4294,7 @@ async function runFirstRunWizard(projectDir: string): Promise<boolean> {
   } catch (error) {
     if (error instanceof FirstRunCancelled) {
       process.stdout.write("\n  Nothing written.\n");
+      process.exitCode = EXIT.usage;
       return true;
     }
     throw error;
@@ -4558,7 +4838,7 @@ function prepareModelsSection(
 ): { argv: string[]; context: ModelsMutationContext } | null {
   const validation = validateModelsArgs(argv);
   if (validation) {
-    emitResult(usage(validation, "aidlc config models --help"), options);
+    emitResult(usage(validation, configCommand("models --help")), options);
     return null;
   }
   if (argv.includes("--help")) {
@@ -4604,7 +4884,7 @@ function prepareModelsSection(
       usage(
         requested && harnesses.length > 0
           ? `project uses ${harnesses.map((item) => item.distribution).join(", ")}; refusing ${requested}`
-          : "aidlc config models requires an installed project harness; run aidlc config first",
+          : `${configCommand("models")} requires an installed project harness; run ${configCommand()} first`,
       ),
       options,
     );
@@ -4641,7 +4921,7 @@ function prepareModelsSection(
         : failure(
             `model policy drift: ${drift.join("; ")}`,
             EXIT.failure,
-            "aidlc config models --show",
+            configCommand("models --show"),
           ),
       options,
     );
@@ -4652,7 +4932,7 @@ function prepareModelsSection(
     emitResult(
       usage(
         "non-interactive model configuration requires a policy flag: --preset, --from, a group effort flag, --agent, or --reset; --yes confirms but never chooses a policy",
-        "aidlc config models --help",
+        configCommand("models --help"),
       ),
       options,
     );
@@ -4708,7 +4988,7 @@ function prepareModelsSection(
       );
       return null;
     }
-    const answer = prompt("Apply model policy changes? [y/N]:");
+    const answer = configPrompt("Apply model policy changes? [y/N]:");
     if (!answer || !/^y(?:es)?$/i.test(answer.trim())) {
       emitResult(usage("model policy change cancelled"), options);
       return null;
@@ -4748,7 +5028,7 @@ function handleSettingsOnlySection(
     ? validateModelsArgs(argv)
     : validateChoiceArgs("flags", argv);
   if (validation) {
-    emitResult(usage(validation, `aidlc config ${section} --help`), options);
+    emitResult(usage(validation, configCommand(`${section} --help`)), options);
     return true;
   }
   let resolved: ResolvedAidlcSettings;
@@ -4809,7 +5089,7 @@ function handleSettingsOnlySection(
   if (!mutationFlags.some((flag) => argv.includes(flag))) {
     emitResult(usage(
       `non-interactive ${section} configuration requires an explicit policy flag`,
-      `aidlc config ${section} --help`,
+      configCommand(`${section} --help`),
     ), options);
     return true;
   }
@@ -4900,7 +5180,7 @@ function handleSettingsOnlySection(
   } catch (error) {
     emitResult(usage(
       error instanceof Error ? error.message : String(error),
-      `aidlc config ${section} --help`,
+      configCommand(`${section} --help`),
     ), options);
   }
   return true;
@@ -4962,7 +5242,7 @@ export async function main(
     emitResult(
       usage(
         `unknown config section ${JSON.stringify(section.value)}; valid sections: models, runtime, providers, trust, flags, project`,
-        "aidlc config <models|runtime|providers|trust|flags|project> --help",
+        configCommand("<models|runtime|providers|trust|flags|project> --help"),
       ),
       options,
     );
@@ -4991,7 +5271,7 @@ export async function main(
       emitResult(
         usage(
           error instanceof Error ? error.message : String(error),
-          "aidlc config models --help",
+          configCommand("models --help"),
         ),
         options,
       );
@@ -5017,7 +5297,7 @@ export async function main(
       emitResult(
         usage(
           error instanceof Error ? error.message : String(error),
-          `aidlc config ${diagnosticSection} --help`,
+          configCommand(`${diagnosticSection} --help`),
         ),
         options,
       );
@@ -5039,7 +5319,7 @@ export async function main(
       emitResult(
         usage(
           error instanceof Error ? error.message : String(error),
-          `aidlc config ${choiceSection} --help`,
+          configCommand(`${choiceSection} --help`),
         ),
         options,
       );
@@ -5070,6 +5350,7 @@ export async function main(
     return;
   }
   const projectDir = projectDirFrom(argv);
+  const projectHarnesses = discoverProjectHarnesses(projectDir);
   const explicitProject = argv.includes("--project-dir") ||
     Boolean(process.env.AIDLC_PROJECT_DIR) ||
     Boolean(process.env.CLAUDE_PROJECT_DIR) ||
@@ -5079,7 +5360,7 @@ export async function main(
   const firstRunWizard = !section &&
     configInputIsTty() &&
     options.mode === "human" &&
-    discoverProjectHarnesses(projectDir).length === 0 &&
+    projectHarnesses.length === 0 &&
     !argv.some((token) =>
       [
         "--dry-run",
@@ -5096,18 +5377,62 @@ export async function main(
       ].includes(token)
     );
   if (firstRunWizard && await runFirstRunWizard(projectDir)) return;
+  const existingWalk = !section &&
+    configInputIsTty() &&
+    options.mode === "human" &&
+    projectHarnesses.length > 0 &&
+    !argv.some((token) =>
+      [
+        "--dry-run",
+        "--force",
+        "--from",
+        "--harness",
+        "--json",
+        "--mcp",
+        "--pin",
+        "--plan-token",
+        "--quiet",
+        "--unpin",
+        "--yes",
+      ].includes(token)
+    );
+  if (existingWalk) {
+    if (projectHarnesses.length > 1) {
+      emitResult(
+        usage("multiple project harnesses are present; pass one --harness <name>"),
+        options,
+      );
+      return;
+    }
+    const installed = projectHarnesses[0];
+    process.stdout.write(
+      `\n  Found ${installed.distribution} in ${installed.harnessDir}/; using the existing copied projection.\n`,
+    );
+    const outstanding = postApplyOutstandingActions(
+      projectDir,
+      installed.harnessDir,
+      modelHarness(installed.distribution),
+    );
+    await runSetupWalk(
+      projectDir,
+      installed.harnessDir,
+      installed.distribution,
+      outstanding,
+    );
+    return;
+  }
   if (!recognized && !explicitProject && !options.yes) {
     if (!configInputIsTty()) {
       emitResult(usage("non-interactive config outside a recognized project requires --project-dir"), options);
       return;
     }
-    const answer = prompt(`Initialize AI-DLC in ${projectDir}? [y/N]:`);
+    const answer = configPrompt(`Initialize AI-DLC in ${projectDir}? [y/N]:`);
     if (!answer || !/^y(?:es)?$/i.test(answer.trim())) {
       emitResult(usage("configuration cancelled; pass --project-dir to select the target explicitly"), options);
       return;
     }
   }
-  let selected: { root: string; cleanup?: string } | null = null;
+  let selected: ConfigSource | null = null;
   let prepared: { root: string; cleanup?: string; regenerated: Set<string> } | null = null;
   try {
     const existing = existingProject(projectDir, requestedHarness);
@@ -5116,8 +5441,33 @@ export async function main(
       throw new Error("project pin .aidlc-version is not a regular file");
     }
     const requiredVersion = regularFile(pinPath) ? readFileSync(pinPath, "utf-8").trim() : undefined;
-    selected = selectSource(requestedHarness, from, existing.distribution, requiredVersion);
-    const { stamp, descriptor } = projectionFiles(selected.root);
+    const recordOnly = Boolean(
+      modelsContext ||
+      diagnosticsContext ||
+      choicesContext?.section === "flags",
+    );
+    if (
+      recordOnly &&
+      existing.distribution &&
+      !from &&
+      !process.env.AIDLC_RUNTIME_ROOT &&
+      !isCompiledExecutable()
+    ) {
+      selected = copiedProjectSource(projectDir, requestedHarness);
+    } else {
+      try {
+        selected = selectSource(
+          requestedHarness,
+          from,
+          existing.distribution,
+          requiredVersion,
+        );
+      } catch (error) {
+        if (!recordOnly || !existing.distribution || from) throw error;
+        selected = copiedProjectSource(projectDir, requestedHarness);
+      }
+    }
+    const { stamp, descriptor } = selected;
     if (existing.distribution && existing.distribution !== stamp.distribution) {
       throw new Error(`project uses ${existing.distribution}; refusing ${stamp.distribution}`);
     }
@@ -5150,6 +5500,8 @@ export async function main(
       projectedSettings.flags,
       diagnosticsContext?.overrides ?? choicesContext?.overrides,
     );
+    const preparedRoot = prepared.root;
+    const preparedRegenerated = prepared.regenerated;
     let recordedProjectMcp: "defaults" | "none" | undefined;
     try {
       const stagedHarnessData = JSON.parse(
@@ -5203,25 +5555,47 @@ export async function main(
       files,
       prepared.regenerated,
     );
-    planRootIntegrations(
-      projectDir,
-      prepared.root,
-      descriptor,
-      prior,
-      mcpMode,
-      argv.includes("--force"),
-      operations,
-      actions,
-      rootContributions,
-    );
-    planRemovedRootIntegrations(
-      projectDir,
-      descriptor,
-      prior,
-      argv.includes("--force"),
-      operations,
-      actions,
-    );
+    if (!selected.projectProjection) {
+      planRootIntegrations(
+        projectDir,
+        prepared.root,
+        descriptor,
+        prior,
+        mcpMode,
+        argv.includes("--force"),
+        operations,
+        actions,
+        rootContributions,
+      );
+      planRemovedRootIntegrations(
+        projectDir,
+        descriptor,
+        prior,
+        argv.includes("--force"),
+        operations,
+        actions,
+      );
+    } else {
+      if (prior) Object.assign(rootContributions, prior.rootContributions);
+      const presentRootIntegrations = descriptor.rootIntegrations.filter(
+        (integration) =>
+          preparedRegenerated.has(integration.path) &&
+          regularFile(join(preparedRoot, integration.path)),
+      );
+      if (presentRootIntegrations.length > 0) {
+        planRootIntegrations(
+          projectDir,
+          preparedRoot,
+          { ...descriptor, rootIntegrations: presentRootIntegrations },
+          prior,
+          mcpMode,
+          argv.includes("--force"),
+          operations,
+          actions,
+          rootContributions,
+        );
+      }
+    }
     planProjectSettingsMutation(
       projectDir,
       settingsMutation,
@@ -5254,7 +5628,7 @@ export async function main(
         ...failure(
           `${conflicts.length} config conflict(s): ${conflicts.map((item) => `${item.path} (${item.detail})`).join(", ")}`,
           EXIT.integrity,
-          "aidlc config --dry-run --verbose",
+          configCommand("--dry-run --verbose"),
         ),
         data: { projectDir, distribution: stamp.distribution, counts, actions },
       }, options);
@@ -5382,7 +5756,7 @@ export async function main(
       emitResult(failure(
         "config plan changed after approval; run aidlc config --dry-run again",
         EXIT.integrity,
-        "aidlc config --dry-run --json",
+        configCommand("--dry-run --json"),
       ), options);
       return;
     }
@@ -5498,18 +5872,33 @@ export async function main(
         projectDir,
         descriptor.harnessDir,
         stamp.distribution,
-        selected.root,
         outstandingActions,
       );
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    const copiedHarness = discoverProjectHarnesses(projectDir)[0];
+    const copiedRefreshWithoutSource = Boolean(
+      copiedHarness &&
+      !from &&
+      /(harness .+ is not installed|no installed harness runtime is available)/.test(rawMessage),
+    );
+    const message = copiedRefreshWithoutSource
+      ? `This copy-channel project already contains ${copiedHarness?.harnessDir}, but refreshing project files needs release source bytes. ` +
+        "Install the native aidlc command when a release is available, or re-copy the matching dist/<harness>/ tree from the aidlc-workflows checkout."
+      : rawMessage;
     emitResult(failure(
       message,
       /pass (?:one )?--harness|--harness requires|multi-harness config/.test(message)
         ? EXIT.usage
         : EXIT.integrity,
-      from ? "aidlc config --from <valid-release-data>" : "aidlc config --harness <name>",
+      copiedRefreshWithoutSource
+        ? "re-copy the matching dist/<harness>/ tree, then rerun this command"
+        : from
+        ? configCommand("--from <valid-release-data>")
+        : selected?.projectProjection
+        ? "install a native release when available, or re-copy the projection from the aidlc-workflows checkout"
+        : configCommand("--harness <name>"),
     ), options);
   } finally {
     if (prepared?.cleanup) rmSync(prepared.cleanup, { recursive: true, force: true });

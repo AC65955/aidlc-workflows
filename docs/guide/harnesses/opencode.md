@@ -103,8 +103,9 @@ git checkout v2
 3. Start opencode in the project and run `/aidlc --doctor`, then `/aidlc`
    followed by what you want to build.
 
-This source/development channel requires Git and Bun. It does not use
-`aidlc config`; the copied tree already contains the workspace shell.
+This source/development channel requires Git and Bun. The copied tree already
+contains the workspace shell; its projected config command may still record
+guided choices without a native install.
 
 ## Refresh and version skew
 

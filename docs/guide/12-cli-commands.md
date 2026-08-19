@@ -200,6 +200,11 @@ or guardrails before the first run, edit the shipped `aidlc/spaces/default/memor
 files; the space-level `aidlc/knowledge/` directory is created (empty) once the
 first intent exists, and you add free-form files to it from there.
 
+The projected copy-channel config command is optional. It recognizes the
+existing projection and may record guided policy, provider, runtime, and trust
+answers without a native install. Refreshing framework files still requires a
+native runtime or a fresh copy from the checkout.
+
 For native machine installs, run `aidlc config` once before opening the harness.
 That command lays down the same shell and records a refresh baseline; workflow
 intent birth remains automatic on the first chat invocation.
@@ -340,8 +345,8 @@ Machine
   ok    4 checks passed
 
 Project (.claude, Claude Code)
-  warn  Instruction file: block or file missing - run `aidlc config`
-        fix: run `aidlc config`
+  warn  Instruction file: block or file missing (.claude/CLAUDE.md)
+        fix: run `bun .claude/tools/aidlc.ts config`
   ok    43 checks passed
 
 Framework integrity

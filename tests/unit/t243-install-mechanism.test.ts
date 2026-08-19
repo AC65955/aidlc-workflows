@@ -2335,7 +2335,7 @@ describe("t243 release lifecycle", () => {
       expect(checks).toContainEqual(expect.objectContaining({
         pass: false,
         label: "Project pin target: resolved target is missing",
-        fix: `run \`aidlc config --pin ${NEXT_VERSION}\``,
+        fix: `run \`bun .claude/tools/aidlc.ts config --pin ${NEXT_VERSION}\``,
       }));
     },
   );

@@ -242,8 +242,10 @@ project files.
 The committed `dist/<harness>/` trees remain available for framework
 development and source-based installs. This channel requires a repository clone,
 Git, and Bun; its hooks and tools run the projected TypeScript files. It does
-not use `aidlc config` because the copied tree already contains the workspace
-shell.
+not need a scaffold step because the copied tree already contains the workspace
+shell. After copying, the projected Bun command may run guided config to record
+models, flags, providers, runtime, and trust answers. A framework-file refresh
+still requires a native release or a fresh copy from this checkout.
 
 ```bash
 git clone https://github.com/awslabs/aidlc-workflows.git
@@ -257,6 +259,8 @@ git checkout v2
 ```bash
 cp -r dist/claude/.claude/ your-project/.claude/
 cp -r dist/claude/aidlc/   your-project/aidlc/
+cd your-project
+bun .claude/tools/aidlc.ts config  # optional guided setup; opening Claude directly is also valid
 ```
 
 </details>
@@ -339,7 +343,8 @@ For a source/development copy install, there is no scaffold step. The
 distribution you copied already ships the
 workspace shell — the `.claude/` engine plus a pre-built `aidlc/spaces/default/`
 holding the memory layer (`aidlc/spaces/default/memory/`, where team-affirmed
-practices and learnings live). You do not run any config command.
+practices and learnings live). Running the copied harness's config command is
+optional and records guided choices; it does not require a native install.
 
 The first time you run `/aidlc` (or describe what to build), the engine
 **auto-births** the first intent into the active space. Each intent gets its own
@@ -406,8 +411,8 @@ Machine
   ok    4 checks passed
 
 Project (.claude, Claude Code)
-  warn  Instruction file: block or file missing - run `aidlc config`
-        fix: run `aidlc config`
+  warn  Instruction file: block or file missing (.claude/CLAUDE.md)
+        fix: run `bun .claude/tools/aidlc.ts config`
   ok    43 checks passed
 
 Framework integrity
