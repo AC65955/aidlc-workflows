@@ -1,6 +1,15 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [2.6.17] - 2026-08-19
+
+Plugins can now extend `/aidlc --doctor` with selection-aware, fail-loud install checks while preserving advisory findings that do not block CI. **Upgrade:** re-copy `dist/<harness>/` so the updated `aidlc-utility.ts` and any installed plugin doctor scripts ship into your project.
+
+* Ship an optional `tools/<plugin>-doctor.ts` script; doctor runs it only when that installed plugin is enabled.
+* Emit `{"checks":[{"pass":boolean,"label":string,"fix"?:string,"severity"?:"error"|"advisory"}]}` on stdout. Broken, timed-out, or malformed scripts become bounded doctor failures instead of crashing the diagnostic.
+* Error-severity failures exit 1; advisory failures remain visible in live output and `--doctor --export` without changing the exit code.
+* `test-pro` now includes a deterministic, read-only reference doctor script that verifies its composed sensors, scope, and agent.
+
 ## [2.6.16] - 2026-08-18
 
 Code Generation now turns the team's affirmed Testing Posture into one fingerprinted execution contract shared by normal and autonomous generation. The resolver preserves additive project/team/org notes, distinguishes TDD, BDD, ATDD, test-after, and custom/mixed ordering, and binds the approved plan to the active scope and Test Strategy. **Upgrade:** re-copy your `dist/<harness>/` shell so the new `aidlc-testing-posture.ts` tool, stage contract, dispatch guard, swarm precondition, and developer persona are installed.

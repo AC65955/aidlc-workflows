@@ -53,6 +53,7 @@ import {
   holdsAuditLock,
   hooksHealthDir,
   isAutonomousMode,
+  isPlainObject,
   isoTimestamp,
   isPackageJson,
   codekbRepoName,
@@ -1202,6 +1203,15 @@ interface NamingMismatch {
   name: string;
 }
 
+type DoctorCheckResult = { pass: boolean; label: string; fix?: string };
+
+const DEFAULT_PLUGIN_DOCTOR_TIMEOUT_MS = 10_000;
+const PLUGIN_DOCTOR_MAX_BUFFER = 256 * 1024;
+const PLUGIN_DOCTOR_MAX_ROWS = 50;
+const PLUGIN_DOCTOR_MAX_TEXT = 300;
+const PLUGIN_DOCTOR_REQUIRED_JSON =
+  '{"checks":[{"pass":boolean,"label":string,"fix"?:string,"severity"?:"error"|"advisory"}]}';
+
 function frontmatterFields(filePath: string, kind: "Agent" | "Scope"): { name: string; plugin: string } {
   const body = readFileSync(filePath, "utf-8");
   const fm = frontmatterBlock(body);
@@ -1236,7 +1246,7 @@ function namingMismatches(
 }
 
 function pushNamingAdvisory(
-  results: Array<{ pass: boolean; label: string; fix?: string }>,
+  results: DoctorCheckResult[],
   label: "Agent" | "Scope",
   mismatches: NamingMismatch[],
 ): void {
@@ -1256,8 +1266,186 @@ function pushNamingAdvisory(
   });
 }
 
+function truncatePluginDoctorText(value: string): string {
+  if (value.length <= PLUGIN_DOCTOR_MAX_TEXT) return value;
+  return `${value.slice(0, PLUGIN_DOCTOR_MAX_TEXT - 3)}...`;
+}
+
+function pluginDoctorResult(
+  pass: boolean,
+  label: string,
+  fix?: string,
+): DoctorCheckResult {
+  return {
+    pass,
+    label: truncatePluginDoctorText(label),
+    ...(fix === undefined ? {} : { fix: truncatePluginDoctorText(fix) }),
+  };
+}
+
+function pluginDoctorTimeoutMs(): number {
+  const raw = process.env.AIDLC_PLUGIN_DOCTOR_TIMEOUT_MS?.trim() ?? "";
+  if (!/^[1-9]\d*$/.test(raw)) return DEFAULT_PLUGIN_DOCTOR_TIMEOUT_MS;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) ? parsed : DEFAULT_PLUGIN_DOCTOR_TIMEOUT_MS;
+}
+
+function invalidPluginDoctorOutput(
+  plugin: string,
+  scriptPath: string,
+  exitCode: number | null,
+  detail: string,
+): DoctorCheckResult {
+  return pluginDoctorResult(
+    false,
+    `Plugin check (${plugin}): ${scriptPath} returned exit code ${exitCode ?? "null"}; required JSON shape ${PLUGIN_DOCTOR_REQUIRED_JSON}`,
+    detail,
+  );
+}
+
+function appendPluginDoctorChecks(
+  results: DoctorCheckResult[],
+  projectDir: string,
+): void {
+  const selected = pluginsEnabled();
+  const installed = knownPluginNames().filter((name) => name !== "aidlc");
+  const enabled = selected === null
+    ? installed
+    : installed.filter((name) => selected.has(name));
+  const harness = harnessDir();
+  const timeoutMs = pluginDoctorTimeoutMs();
+
+  for (const plugin of enabled) {
+    const scriptPath = join(projectDir, harness, "tools", `${plugin}-doctor.ts`);
+    if (!existsSync(scriptPath)) continue;
+
+    // Installing a plugin is the trust boundary for its code. Spawn its doctor
+    // script directly through Bun (never a shell), following the sensor
+    // dispatcher's sibling-script precedent. Sensors fail open because they are
+    // advisory runtime checks; doctor fails loud because this is the diagnostic
+    // surface users rely on to explain a broken install.
+    const startedAt = Date.now();
+    const run = spawnSync(Bun.which("bun") ?? "bun", [scriptPath], {
+      cwd: projectDir,
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        AIDLC_PROJECT_DIR: projectDir,
+        AIDLC_HARNESS_DIR: harness,
+        AIDLC_PLUGIN_NAME: plugin,
+      },
+      maxBuffer: PLUGIN_DOCTOR_MAX_BUFFER,
+      timeout: timeoutMs,
+      windowsHide: true,
+    });
+    const elapsedMs = Date.now() - startedAt;
+    const spawnCode = (run.error as NodeJS.ErrnoException | undefined)?.code;
+    const timedOut =
+      spawnCode === "ETIMEDOUT" ||
+      (run.signal === "SIGTERM" &&
+        elapsedMs >= Math.max(0, timeoutMs - 100));
+
+    if (timedOut) {
+      results.push(pluginDoctorResult(
+        false,
+        `Plugin check (${plugin}): check script timed out after ${timeoutMs}ms`,
+        `Inspect or replace ${scriptPath}.`,
+      ));
+      continue;
+    }
+
+    if (run.error) {
+      results.push(pluginDoctorResult(
+        false,
+        `Plugin check (${plugin}): check script spawn failed: ${errorMessage(run.error)}`,
+        `Verify ${scriptPath} can be run with Bun.`,
+      ));
+      continue;
+    }
+
+    if (run.status !== 0) {
+      results.push(invalidPluginDoctorOutput(
+        plugin,
+        scriptPath,
+        run.status,
+        "The script exited non-zero; repair it and emit only the required JSON object on stdout.",
+      ));
+      continue;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(typeof run.stdout === "string" ? run.stdout.trim() : "");
+    } catch (e) {
+      results.push(invalidPluginDoctorOutput(
+        plugin,
+        scriptPath,
+        run.status,
+        `stdout was not valid JSON: ${errorMessage(e)}`,
+      ));
+      continue;
+    }
+    if (!isPlainObject(parsed) || !Array.isArray(parsed.checks)) {
+      results.push(invalidPluginDoctorOutput(
+        plugin,
+        scriptPath,
+        run.status,
+        `stdout did not contain a checks array matching ${PLUGIN_DOCTOR_REQUIRED_JSON}.`,
+      ));
+      continue;
+    }
+
+    let malformed = 0;
+    let emitted = 0;
+    let truncated = 0;
+    for (const entry of parsed.checks) {
+      if (
+        !isPlainObject(entry) ||
+        typeof entry.pass !== "boolean" ||
+        typeof entry.label !== "string"
+      ) {
+        malformed++;
+        continue;
+      }
+      if (emitted >= PLUGIN_DOCTOR_MAX_ROWS) {
+        truncated++;
+        continue;
+      }
+
+      const label = `Plugin check (${plugin}): ${entry.label}`;
+      const fix = typeof entry.fix === "string" ? entry.fix : undefined;
+      if (entry.pass) {
+        results.push(pluginDoctorResult(true, label));
+      } else if (entry.severity === "advisory") {
+        results.push(pluginDoctorResult(
+          true,
+          `${label} (advisory): ${fix ?? "review this plugin-provided finding"}`,
+        ));
+      } else {
+        results.push(pluginDoctorResult(false, label, fix));
+      }
+      emitted++;
+    }
+
+    if (malformed > 0) {
+      results.push(pluginDoctorResult(
+        false,
+        `Plugin check (${plugin}): ${malformed} malformed check entr${malformed === 1 ? "y" : "ies"} skipped`,
+        `Every entry must match ${PLUGIN_DOCTOR_REQUIRED_JSON}.`,
+      ));
+    }
+    if (truncated > 0) {
+      results.push(pluginDoctorResult(
+        false,
+        `Plugin check (${plugin}): ${truncated} check result(s) truncated after ${PLUGIN_DOCTOR_MAX_ROWS} rows`,
+        `Reduce the number of checks emitted by ${scriptPath}.`,
+      ));
+    }
+  }
+}
+
 function handleDoctor(projectDir: string, flags: Record<string, string> = {}): void {
-  const results: Array<{ pass: boolean; label: string; fix?: string }> = [];
+  const results: DoctorCheckResult[] = [];
   const isWindows = process.platform === "win32";
 
   // 1. bun installed — check PATH (Bun.which handles Windows .exe suffix automatically)
@@ -1776,6 +1964,18 @@ function handleDoctor(projectDir: string, flags: Record<string, string> = {}): v
     results.push({
       pass: false,
       label: "Plugin selection: check failed",
+      fix: errorMessage(e),
+    });
+  }
+
+  // 4d. Optional plugin-authored install diagnostics. Discovery is
+  // selection-aware, so a disabled plugin's executable check remains inert.
+  try {
+    appendPluginDoctorChecks(results, projectDir);
+  } catch (e) {
+    results.push({
+      pass: false,
+      label: "Plugin checks: discovery failed",
       fix: errorMessage(e),
     });
   }

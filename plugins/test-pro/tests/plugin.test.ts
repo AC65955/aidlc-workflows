@@ -10,8 +10,18 @@
 //
 // Run:  bun test plugins/test-pro/tests/plugin.test.ts
 
-import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -28,6 +38,9 @@ const PLUGIN_ROOT = join(HERE, "..");
 const REPO_ROOT = join(PLUGIN_ROOT, "..", "..");
 const CORE_STAGES = join(REPO_ROOT, "dist", "claude", ".claude", "aidlc-common", "stages");
 const AGENTS_DIR = join(REPO_ROOT, "dist", "claude", ".claude", "agents");
+const CLAUDE_DIST = join(REPO_ROOT, "dist", "claude", ".claude");
+const MEMORY_DIST = join(REPO_ROOT, "dist", "claude", "aidlc");
+const PLUGIN_DIST = join(REPO_ROOT, "dist", "plugins", "test-pro", "claude");
 
 const PLUGIN_NAME = "test-pro";
 
@@ -179,5 +192,53 @@ describe(`${PLUGIN_NAME} plugin — own content validation`, () => {
       expect(m.version).toBeTruthy();
       expect(m.aidlc?.contributes).toBeTruthy();
     });
+  });
+});
+
+describe(`${PLUGIN_NAME} plugin — composed doctor check`, () => {
+  let tmp = "";
+  let project = "";
+
+  beforeAll(() => {
+    tmp = mkdtempSync(join(tmpdir(), "aidlc-test-pro-doctor-"));
+    project = join(tmp, "project");
+    mkdirSync(project, { recursive: true });
+    cpSync(CLAUDE_DIST, join(project, ".claude"), { recursive: true });
+    cpSync(MEMORY_DIST, join(project, "aidlc"), { recursive: true });
+    const compose = spawnSync(process.execPath, [join(PLUGIN_DIST, "hooks", "compose.ts")], {
+      cwd: project,
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_ROOT: PLUGIN_DIST,
+        CLAUDE_PROJECT_DIR: project,
+        AIDLC_HARNESS_DIR: ".claude",
+      },
+    });
+    if (compose.status !== 0) {
+      throw new Error(`test-pro compose failed: ${compose.stderr ?? compose.stdout}`);
+    }
+  });
+
+  afterAll(() => {
+    if (tmp) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("doctor surfaces the plugin's reference checks after compose", () => {
+    const doctor = spawnSync(
+      process.execPath,
+      [join(project, ".claude", "tools", "aidlc-utility.ts"), "doctor", "--project-dir", project],
+      {
+        cwd: project,
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          CLAUDE_PROJECT_DIR: project,
+          AIDLC_HARNESS_DIR: ".claude",
+        },
+      },
+    );
+    expect(doctor.status, `${doctor.stdout ?? ""}${doctor.stderr ?? ""}`).toBe(0);
+    expect(doctor.stdout).toContain("Plugin check (test-pro):");
   });
 });
