@@ -28,6 +28,10 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
+      # Regenerate the projections from core/ + harness/ so the release gate
+      # tests CI-built bytes; the --check inside `bun run check` then acts as a
+      # generator-determinism guard rather than a staleness check.
+      - run: bun scripts/package.ts
       - run: bun run check
       - run: bash tests/run-tests.sh --ci --parallel 8
       - name: ShellCheck installer
@@ -47,6 +51,9 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
+      # t238 builds the native binary from dist-release/; regenerate first so
+      # the smoke proves CI-built bytes on every OS in the matrix.
+      - run: bun scripts/package.ts
       - run: bun test tests/unit/t238-build-binaries.test.ts
       - if: runner.os == 'Windows'
         run: bun test tests/unit/t244-install-management.test.ts -t "t244 Windows and completion release surfaces"
@@ -96,6 +103,10 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
+      # Build from projections regenerated on this runner, never from the
+      # committed trees; the --check that follows is the generator-determinism
+      # guard (regen twice, byte-compare), not a staleness check.
+      - run: bun scripts/package.ts
       - run: bun scripts/package.ts --check
       - run: bun scripts/build-binaries.ts --target ${{ matrix.target }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

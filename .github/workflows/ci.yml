@@ -60,6 +60,15 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Regenerate every dist/<harness> projection from core/ + harness/ before
+      # the tiers run, so the suite exercises CI-built bytes instead of trusting
+      # the committed trees. The contract job's --check still guards the
+      # committed copies against drift for as long as the copy channel ships
+      # them; this step is what lets those trees leave the repo later without
+      # touching CI.
+      - name: Build the harness projections
+        run: bun scripts/package.ts
+
       # t244 syntax-checks the generated zsh completion script with `zsh -n`;
       # ubuntu-latest does not ship zsh, so install it to keep that assertion
       # exercising the real shell instead of skipping.

@@ -1337,5 +1337,50 @@ describe("t244 Windows and completion release surfaces", () => {
     expect(publish).toContain("build/release/aidlc-release.intoto.jsonl");
     expect(publish).not.toContain("scripts/package-release.ts");
     expect(publish).not.toContain("pattern: binary-*");
+
+    // Release artifacts must build from projections regenerated ON the runner,
+    // never from the committed trees: every dist-consuming job regenerates
+    // before its consuming step, and the build job keeps --check after the
+    // regen as a generator-determinism guard. This ordering is what lets the
+    // committed dist trees leave the repository without touching the release
+    // pipeline.
+    const regen = "run: bun scripts/package.ts\n";
+    const verifyJob = workflow.slice(
+      workflow.indexOf("  verify:"),
+      workflow.indexOf("  native-smoke:"),
+    );
+    expect(verifyJob).toContain(regen);
+    expect(verifyJob.indexOf(regen)).toBeLessThan(verifyJob.indexOf("- run: bun run check"));
+    const nativeSmokeJob = workflow.slice(
+      workflow.indexOf("  native-smoke:"),
+      workflow.indexOf("  build:"),
+    );
+    expect(nativeSmokeJob).toContain(regen);
+    expect(nativeSmokeJob.indexOf(regen))
+      .toBeLessThan(nativeSmokeJob.indexOf("t238-build-binaries.test.ts"));
+    const buildJob = workflow.slice(
+      workflow.indexOf("  build:"),
+      workflow.indexOf("  musl-smoke:"),
+    );
+    expect(buildJob).toContain(regen);
+    expect(buildJob.indexOf(regen))
+      .toBeLessThan(buildJob.indexOf("bun scripts/package.ts --check"));
+    expect(buildJob.indexOf("bun scripts/package.ts --check"))
+      .toBeLessThan(buildJob.indexOf("bun scripts/build-binaries.ts"));
+  });
+
+  test("CI test job builds the projections before running the tiers", () => {
+    // The same generator-driven rule for the per-push gate: the tiers exercise
+    // CI-built bytes, so removing the committed dist trees later cannot change
+    // what CI tests. The contract job keeps `bun run check` (and its --check
+    // drift guard) for as long as the copy channel ships committed trees.
+    const ci = readFileSync(
+      join(REPO_ROOT, ".github", "workflows", "ci.yml"),
+      "utf-8",
+    );
+    const testJob = ci.slice(ci.indexOf("\n  test:"), ci.indexOf("\n  changelog-guard:"));
+    const regen = "run: bun scripts/package.ts";
+    expect(testJob).toContain(regen);
+    expect(testJob.indexOf(regen)).toBeLessThan(testJob.indexOf("tests/run-tests.ts"));
   });
 });
