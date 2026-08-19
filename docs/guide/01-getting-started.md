@@ -407,7 +407,7 @@ Machine
   warn  Runtime hook PATH: bun is interactive-only at /home/user/.bun/bin/bun
         fix: Install Bun, then add ~/.bun/bin to the login-independent environment used by the harness, not only .zshrc or .bash_profile.
   warn  Update: update check unavailable while offline
-        fix: run `aidlc update --check`
+        fix: run `bun .claude/tools/aidlc.ts update --check`
   ok    4 checks passed
 
 Project (.claude, Claude Code)
@@ -420,7 +420,7 @@ Framework integrity
 
 0 problems, 3 warnings.
 Warnings are advisory - if everything works, ignore them.
-Run 'aidlc doctor --verbose' to see every check.
+Run 'bun .claude/tools/aidlc.ts doctor --verbose' to see every check.
 ```
 
 ### Fixing failures

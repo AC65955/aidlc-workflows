@@ -5303,7 +5303,24 @@ export function writeFileAtomic(path: string, data: string): void {
     writeFileSync(fd, data, "utf-8");
     closeSync(fd);
     fd = undefined;
-    renameSync(tmp, path);
+    const attempts = process.platform === "win32" ? 100 : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        renameSync(tmp, path);
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        const retryable = process.platform === "win32" &&
+          ["EACCES", "EBUSY", "EEXIST", "ENOTEMPTY", "EPERM"].includes(code ?? "") &&
+          attempt + 1 < attempts;
+        if (!retryable) throw error;
+        // Windows can transiently deny rename-over while another process or
+        // scanner still has the previous file open. The caller's lock already
+        // serializes writers; retry the atomic replacement instead of letting a
+        // swallowed hook error lose the completed read-modify-write.
+        Bun.sleepSync(5);
+      }
+    }
     ownsTmp = false;
   } catch (err) {
     if (fd !== undefined) {

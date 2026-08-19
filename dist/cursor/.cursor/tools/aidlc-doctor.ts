@@ -89,6 +89,7 @@ export async function doctorUpdateState(
 }
 
 function updateCheck(state: UpdateState): DoctorCheck {
+  const invoke = aidlcInvocation();
   return {
     pass: state.state === "current",
     severity: state.state === "current" || state.state === "invalid-config"
@@ -96,12 +97,12 @@ function updateCheck(state: UpdateState): DoctorCheck {
       : "warn",
     label: `Update: ${state.message}`,
     fix: state.state === "behind"
-      ? "run `aidlc update`"
+      ? `run \`${invoke} update\``
       : state.state === "invalid-config"
-      ? "run `aidlc config list --global` and correct the invalid update setting"
+      ? `run \`${invoke} config list --global\` and correct the invalid update setting`
       : state.state === "current"
       ? undefined
-      : "run `aidlc update --check`",
+      : `run \`${invoke} update --check\``,
   };
 }
 
@@ -210,8 +211,9 @@ function humanReport(
   );
   const status = (check: DoctorCheck): "ok" | "warn" | "fail" =>
     check.severity === "warn" ? "warn" : check.pass ? "ok" : "fail";
+  const invoke = aidlcInvocation();
   const fallbackFix =
-    "run `aidlc doctor --verbose`, correct the named condition, then rerun `aidlc doctor`";
+    `run \`${invoke} doctor --verbose\`, correct the named condition, then rerun \`${invoke} doctor\``;
   const renderCheck = (check: DoctorCheck): string => {
     const verdict = status(check);
     let row = `  ${verdict.padEnd(5)} ${check.label}\n`;

@@ -1227,6 +1227,7 @@ function editDistance(left: string, right: string): number {
 }
 
 function publicCommandError(command: string): Action {
+  const invoke = aidlcInvocation();
   const nearest = [...PUBLIC_COMMANDS]
     .map((candidate) => ({ candidate, distance: editDistance(command, candidate) }))
     .sort((left, right) =>
@@ -1241,8 +1242,8 @@ function publicCommandError(command: string): Action {
     message: `aidlc: unknown command or noun '${command}'; try 'aidlc --help'\n`,
     humanMessage:
       `error: unknown command '${command}'\n${tip}\n` +
-      "usage: aidlc <command> [flags]\n" +
-      "For the full list, run 'aidlc --help'.\n",
+      `usage: ${invoke} <command> [flags]\n` +
+      `For the full list, run '${invoke} --help'.\n`,
   };
 }
 

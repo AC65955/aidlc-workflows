@@ -1329,6 +1329,32 @@ export type DoctorReport = {
   failed: number;
 };
 
+function collapseLegacyPolicyChecks(checks: readonly DoctorCheck[]): DoctorCheck[] {
+  const marker = "harness.json contains legacy policy key(s)";
+  const indexes = checks.flatMap((check, index) =>
+    check.fix?.includes(marker) ? [index] : []
+  );
+  if (indexes.length === 0) return [...checks];
+  const direct = indexes
+    .map((index) => checks[index].fix ?? "")
+    .sort((left, right) => left.length - right.length)[0];
+  const details =
+    /^(.*harness\.json): harness\.json contains legacy policy key\(s\) ([^.]+)\./
+      .exec(direct);
+  const path = details?.[1] ?? "tools/data/harness.json";
+  const keys = details?.[2] ?? "models or flags";
+  const collapsed: DoctorCheck = {
+    pass: false,
+    label: `Harness data: legacy policy key(s) ${keys} in ${path}`,
+    fix: direct,
+  };
+  const first = indexes[0];
+  const duplicates = new Set(indexes);
+  return checks.flatMap((check, index) =>
+    index === first ? [collapsed] : duplicates.has(index) ? [] : [check]
+  );
+}
+
 function projectedFileRepair(
   distribution: string,
   relativePath: string,
@@ -3424,6 +3450,7 @@ export async function collectDoctorReport(
   }
 
   results.push(...extraChecks);
+  const reportResults = collapseLegacyPolicyChecks(results);
 
   // Cold-safe gate: only emit audit when an audit trail already exists. On a
   // pristine project (no audit shard / flat audit.md) doctor prints its health
@@ -3442,7 +3469,7 @@ export async function collectDoctorReport(
   let passed = 0;
   let warnings = 0;
   let failed = 0;
-  for (const r of results) {
+  for (const r of reportResults) {
     if (r.severity === "warn") {
       warnings++;
     } else if (r.pass) {
@@ -3462,7 +3489,7 @@ export async function collectDoctorReport(
     });
   }
 
-  return { checks: results, passed, warnings, failed };
+  return { checks: reportResults, passed, warnings, failed };
 }
 
 // ---------------------------------------------------------------------------

@@ -472,6 +472,9 @@ describe("t244 machine configuration and update discovery", () => {
       expect(state.state).toBe("behind");
       expect(readUpdateCache()?.latestVersion).toBe(NEXT_VERSION);
       expect(cachedUpdateNotice()).toContain(`aidlc ${NEXT_VERSION}`);
+      expect(cachedUpdateNotice()).toContain(
+        "Update with: bun .claude/tools/aidlc.ts update",
+      );
       expect(server.requests.filter((path) => path.endsWith("version.json"))).toHaveLength(1);
       expect(server.requests.filter((path) => path.endsWith("checksums.txt"))).toHaveLength(1);
 

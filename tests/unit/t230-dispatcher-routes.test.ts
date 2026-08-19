@@ -1502,12 +1502,15 @@ describe("t230 dispatcher help and errors", () => {
     expect(res.exitCode).toBe(2);
     expect(res.stdout.toString("utf-8")).toBe("");
     expect(res.stderr.toString("utf-8")).toBe(
-      "error: unknown command 'bogus'\n\nusage: aidlc <command> [flags]\nFor the full list, run 'aidlc --help'.\n",
+      "error: unknown command 'bogus'\n\nusage: bun .claude/tools/aidlc.ts <command> [flags]\n" +
+        "For the full list, run 'bun .claude/tools/aidlc.ts --help'.\n",
     );
     const suggestion = viaDispatcher(["confg"], REPO_ROOT);
     expect(suggestion.exitCode).toBe(2);
     expect(suggestion.stderr.toString("utf-8")).toBe(
-      "error: unknown command 'confg'\n\n  tip: did you mean 'config'?\n\nusage: aidlc <command> [flags]\nFor the full list, run 'aidlc --help'.\n",
+      "error: unknown command 'confg'\n\n  tip: did you mean 'config'?\n\n" +
+        "usage: bun .claude/tools/aidlc.ts <command> [flags]\n" +
+        "For the full list, run 'bun .claude/tools/aidlc.ts --help'.\n",
     );
   });
 
@@ -1518,10 +1521,10 @@ describe("t230 dispatcher help and errors", () => {
     expect(result.exitCode).toBe(2);
     expect(result.stdout.toString("utf-8")).toBe("");
     expect(result.stderr.toString("utf-8")).toBe(
-      "error: unknown config section 'modles'\n\n" +
+        "error: unknown config section 'modles'\n\n" +
         "  tip: did you mean 'models'?\n\n" +
-        "usage: aidlc config <section> [flags]\n" +
-        "For the full list, run 'aidlc config --help'.\n",
+        "usage: bun .claude/tools/aidlc.ts config <section> [flags]\n" +
+        "For the full list, run 'bun .claude/tools/aidlc.ts config --help'.\n",
     );
   });
 

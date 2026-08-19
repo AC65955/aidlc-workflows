@@ -83,6 +83,13 @@ function runCopied(
   };
 }
 
+function expectCopyChannelPurity(output: string): void {
+  expect(output).not.toContain("Run: ");
+  expect(output).not.toMatch(
+    /(?:^|[\s`'"])aidlc (?:config|doctor|update|use|uninstall|version)(?:\s|[`'"]|$)/m,
+  );
+}
+
 function runWizard(
   input: string,
   options: { hasCredentials?: boolean } = {},
@@ -221,9 +228,79 @@ describe("t300 copied projection configuration", () => {
     ]);
     expect(result.status).toBe(2);
     expect(result.stdout).toStartWith("error:");
-    expect(result.stdout).toContain("\nusage:");
+    expect(result.stdout).toContain(
+      "\nusage: bun .claude/tools/aidlc.ts config models --preset balanced --project --yes",
+    );
     expect(result.stdout).not.toContain("ERROR ");
     expect(result.stdout).not.toContain("Run: ");
+  });
+
+  test("copy-channel doctor, config, and error output never leaks native invocations", () => {
+    const project = readmeCopyProject();
+    const git = spawnSync("git", ["init", "-q"], {
+      cwd: project,
+      encoding: "utf-8",
+    });
+    expect(git.status, git.stderr ?? "").toBe(0);
+    const doctor = runCopied(project, ["doctor"]);
+    expect(doctor.status).toBe(0);
+    expect(doctor.stdout).toContain(
+      "fix: run `bun .claude/tools/aidlc.ts update --check`",
+    );
+    expect(doctor.stdout).toContain(
+      "fix: run `bun .claude/tools/aidlc.ts doctor --verbose`",
+    );
+
+    const topTypo = runCopied(project, ["confg"]);
+    expect(topTypo.status).toBe(2);
+    expect(topTypo.stderr).toContain(
+      "usage: bun .claude/tools/aidlc.ts <command> [flags]",
+    );
+
+    const sectionTypo = runCopied(project, ["config", "modles"], {
+      env: { AIDLC_TEST_CONFIG_TTY: "1" },
+      input: "",
+    });
+    expect(sectionTypo.status).toBe(2);
+    expect(sectionTypo.stderr).toContain(
+      "usage: bun .claude/tools/aidlc.ts config <section> [flags]",
+    );
+
+    const noYes = runCopied(project, [
+      "config",
+      "models",
+      "--preset",
+      "balanced",
+      "--project",
+    ]);
+    expect(noYes.status).toBe(2);
+
+    for (const result of [doctor, topTypo, sectionTypo, noYes]) {
+      expectCopyChannelPurity(`${result.stdout}${result.stderr}`);
+    }
+  });
+
+  test("legacy harness policy breakage collapses to one doctor row", () => {
+    const project = readmeCopyProject();
+    const path = join(project, ".claude", "tools", "data", "harness.json");
+    const harness = JSON.parse(readFileSync(path, "utf-8"));
+    harness.models = { schemaVersion: 1 };
+    writeFileSync(path, `${JSON.stringify(harness, null, 2)}\n`);
+    const doctor = runCopied(project, ["doctor", "--json"]);
+    expect(doctor.status).toBe(1);
+    const checks = (JSON.parse(doctor.stdout) as {
+      data: { checks: Array<{ label: string; fix?: string }> };
+    }).data.checks;
+    const legacy = checks.filter((check) =>
+      `${check.label} ${check.fix ?? ""}`.includes(
+        "legacy policy key(s)",
+      )
+    );
+    expect(legacy).toHaveLength(1);
+    expect(legacy[0].label).toContain("Harness data:");
+    expect(legacy[0].fix).toContain(
+      "Remove models",
+    );
   });
 });
 
@@ -280,6 +357,8 @@ describe("t300 first-run prompt and detection safety", () => {
       "provider recorded as other; manual provider setup remains",
     );
     expect(result.stdout).toContain("Choose and configure a model provider");
+    expect(result.stdout).not.toContain("Run: ");
+    expectCopyChannelPurity(result.stdout);
     const harness = JSON.parse(
       readFileSync(join(result.project, ".claude", "tools", "data", "harness.json"), "utf-8"),
     );

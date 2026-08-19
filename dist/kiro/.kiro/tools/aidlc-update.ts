@@ -20,6 +20,7 @@ import {
   transactionState,
   writeOperation,
 } from "./aidlc-transaction.ts";
+import { aidlcInvocation } from "./aidlc-runtime-paths.ts";
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -96,7 +97,7 @@ function cacheState(cache: UpdateCache, now = Date.now()): UpdateState {
     checkedAt: cache.checkedAt,
     stale,
     message: behind
-      ? `binary ${AIDLC_VERSION}, latest ${cache.latestVersion} - run aidlc update`
+      ? `binary ${AIDLC_VERSION}, latest ${cache.latestVersion}`
       : stale
       ? `binary ${AIDLC_VERSION}; update cache is stale`
       : `binary ${AIDLC_VERSION} is latest`,
@@ -143,7 +144,7 @@ export function cachedUpdateState(): UpdateState {
 export function cachedUpdateNotice(): string | null {
   const state = cachedUpdateState();
   return state.state === "behind" && state.latestVersion
-    ? `Update available: aidlc ${state.latestVersion} (current ${AIDLC_VERSION}). Run: aidlc update`
+    ? `Update available: aidlc ${state.latestVersion} (current ${AIDLC_VERSION}). Update with: ${aidlcInvocation()} update`
     : null;
 }
 

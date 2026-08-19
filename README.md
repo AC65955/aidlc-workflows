@@ -289,14 +289,14 @@ irm https://claude.ai/install.ps1 | iex
 curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
 ```
 
-(If `&&` reports `The token '&&' is not a valid statement separator`, you're in PowerShell — use the PowerShell block above.) Prefer Homebrew on macOS? `brew install --cask claude-code`. Verify with `claude --version`.
+(If `&&` reports `The token '&&' is not a valid statement separator`, you're in PowerShell - use the PowerShell block above.) Prefer Homebrew on macOS? `brew install --cask claude-code`. Verify with `claude --version`.
 
 **2. Set up your project**
 
 ```bash
 # Copy the implementation (engine + the workspace shell sibling), then launch
 cp -r dist/claude/.claude/ your-project/.claude/
-cp -r dist/claude/aidlc/   your-project/aidlc/     # the workspace shell — a sibling of .claude/, not inside it
+cp -r dist/claude/aidlc/   your-project/aidlc/     # the workspace shell - a sibling of .claude/, not inside it
 cd your-project
 bun .claude/tools/aidlc.ts config                  # optional guided policy/provider/trust setup
 claude

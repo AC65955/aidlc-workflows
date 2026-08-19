@@ -1531,6 +1531,20 @@ function configCommand(args = ""): string {
   return `${aidlcInvocation()} config${args ? ` ${args}` : ""}`;
 }
 
+function commandToken(value: string): string {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value)
+    ? value
+    : JSON.stringify(value);
+}
+
+function configMutationRerun(
+  section: "models" | "runtime" | "providers" | "trust" | "flags" | "project",
+  argv: readonly string[],
+): string {
+  const args = argv.filter((arg) => arg !== "--yes").map(commandToken);
+  return configCommand([section, ...args, "--yes"].join(" "));
+}
+
 function configCommandForHarness(harnessDir: string, args = ""): string {
   const invoke = aidlcInvocation() === "aidlc"
     ? "aidlc"
@@ -1882,6 +1896,7 @@ function prepareDiagnosticSection(
       emitResult(
         usage(
           `non-interactive ${section} mutation requires --yes; --yes confirms but never chooses`,
+          configMutationRerun(section, argv),
         ),
         options,
       );
@@ -2613,6 +2628,7 @@ function prepareChoiceSection(
       emitResult(
         usage(
           `non-interactive ${section} mutation requires --yes; --yes confirms but never chooses`,
+          configMutationRerun(section, argv),
         ),
         options,
       );
@@ -4009,7 +4025,7 @@ function renderFirstRunEnding(
         continue;
       }
       process.stdout.write(`    ${action.message}\n`);
-      process.stdout.write(`    Run: ${action.command}\n\n`);
+      process.stdout.write(`    fix: ${action.command}\n\n`);
     }
   }
   const [open, invoke] = firstRunNextCommands(
@@ -4983,6 +4999,7 @@ function prepareModelsSection(
       emitResult(
         usage(
           "non-interactive model policy mutation requires --yes; --yes confirms the selected policy but never chooses one",
+          configMutationRerun("models", argv),
         ),
         options,
       );
@@ -5161,6 +5178,7 @@ function handleSettingsOnlySection(
     if (!options.yes) {
       emitResult(usage(
         `non-interactive ${section} mutation requires --yes; --yes confirms but never chooses`,
+        configMutationRerun(section, argv),
       ), options);
       return true;
     }
@@ -5234,8 +5252,10 @@ export async function main(
       if (nearest && nearest.distance <= 2) {
         process.stderr.write(`\n  tip: did you mean '${nearest.candidate}'?\n`);
       }
-      process.stderr.write("\nusage: aidlc config <section> [flags]\n");
-      process.stderr.write("For the full list, run 'aidlc config --help'.\n");
+      process.stderr.write(`\nusage: ${configCommand("<section> [flags]")}\n`);
+      process.stderr.write(
+        `For the full list, run '${configCommand("--help")}'.\n`,
+      );
       process.exitCode = EXIT.usage;
       return;
     }

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { REPO_ROOT } from "../harness/fixtures.ts";
+import { binRoot } from "../../core/tools/aidlc-install-paths.ts";
 
 const BUN = process.execPath;
 const INIT = join(REPO_ROOT, "core", "tools", "aidlc-init.ts");
@@ -126,7 +127,15 @@ describe("t299 first-run setup wizard", () => {
     expect(result.stdout).toContain(
       "Recording your choices ... done  (aidlc.settings.json in this project)",
     );
-    expect(result.stdout).toContain('export PATH="$HOME/.local/bin:$PATH"');
+    if (process.platform === "win32") {
+      expect(result.stdout).toContain(
+        `Add ${binRoot()} to your User PATH in Windows Settings, then open a new terminal.`,
+      );
+      expect(result.stdout).not.toContain('export PATH="$HOME/.local/bin:$PATH"');
+    } else {
+      expect(result.stdout).toContain('export PATH="$HOME/.local/bin:$PATH"');
+      expect(result.stdout).not.toContain("to your User PATH in Windows Settings");
+    }
     expect(result.stdout).toContain(
       "Full diagnostics: bun .claude/tools/aidlc.ts config runtime --show",
     );
