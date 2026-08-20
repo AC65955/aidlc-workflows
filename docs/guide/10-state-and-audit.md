@@ -169,7 +169,8 @@ stale-receipt recovery.
 
 The workspace-global `Source Fingerprint` is normally the outer post-review
 mutation boundary. One narrow reconciliation makes the documented “revert”
-recovery real: after an unclaimed addition is removed, completion can continue
+recovery real: after any unclaimed baseline change (addition, modification, or
+deletion) is fully reverted, completion can continue
 only when the stage baseline is present and valid, every applicable unit still
 has a fresh modern binding, and the baseline-to-current delta has zero
 unclaimed paths. Ordinary post-review edits, stale or legacy unit evidence, and

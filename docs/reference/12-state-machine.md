@@ -196,13 +196,13 @@ cross-shard rows that would decide a boundary or newest claimant fail closed
 instead of trusting shard filename order.
 
 There is one narrowly bounded reconciliation of the global boundary: if an
-unclaimed addition seen by the newest review is later reverted, completion may
-proceed only when the effective baseline snapshot is present and valid, every
-applicable unit still has a fresh modern unit binding, and the baseline-to-
-current delta contains zero unclaimed paths. This proves that the transient
-unclaimed addition is gone. Any ordinary post-review edit, stale or legacy unit
-binding, missing evidence, or remaining unclaimed delta still takes the normal
-global-first refusal path.
+unclaimed baseline change — addition, modification, or deletion — is fully
+reverted, completion may proceed only when the effective baseline snapshot is
+present and valid, every applicable unit still has a fresh modern unit binding,
+and the baseline-to-current delta contains zero unclaimed paths. This proves
+that the transient unclaimed change is gone. Any ordinary post-review edit,
+stale or legacy unit binding, missing evidence, or remaining unclaimed delta
+still takes the normal global-first refusal path.
 
 Migration is deliberate: a pre-upgrade workflow with no baseline skips the
 unclaimed check, and a fieldless per-unit receipt retains the #629 global
