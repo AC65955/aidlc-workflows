@@ -1295,6 +1295,15 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
     const seeded = readFileSync(join(FIXTURES_DIR, "state-construction-with-worktree.md"), "utf-8")
       .replace(/^(- \*\*Bolt Refs\*\*: ).*$/m, "$1");
     writeFileSync(seededStateFile(proj), seeded);
+    // Swarm preparation records authoritative Bolt boundaries in the worktree;
+    // keep that lifecycle authoritative instead of requiring the main fixture's
+    // static DAG to enumerate every unit name used by these focused scenarios.
+    const statePath = seededStateFile(proj);
+    writeFileSync(
+      statePath,
+      `${readFileSync(statePath, "utf-8")}\n- **Construction Autonomy Mode**: autonomous\n`,
+      "utf-8",
+    );
     mkdirSync(seededAuditDir(proj), { recursive: true });
     writeFileSync(join(seededAuditDir(proj), "fixture.md"), "# AI-DLC Audit Log\n");
     writeFileSync(
@@ -1360,6 +1369,32 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
     writeFileSync(join(coverWt, "extra.ts"), "export const extra = 1;\n");
     recordReview(coverWt, "code-generation", REVIEWER, "cover", "READY", [{ path: "owned.ts" }, { path: "extra.ts" }]);
     expect(runSwarm(covered, ["finalize", "--batch", "1", "--units", "cover", "--claimed", "cover", "--check-cmd", `"${process.execPath}" -e "process.exit(0)"`]).rc).toBe(0);
+
+    const modernFieldless = makeFixture();
+    runSwarm(modernFieldless, ["prepare", "--batch", "1", "--units", "fieldless", "--base", "main"]);
+    const fieldlessWt = wtPath(modernFieldless, "fieldless");
+    writeFileSync(join(fieldlessWt, "owned.ts"), "export const owned = 1;\n");
+    recordReview(fieldlessWt, "code-generation", REVIEWER, "fieldless", "READY", [{ path: "owned.ts" }]);
+    for (const name of readdirSync(seededAuditDir(fieldlessWt)).filter((entry) => entry.endsWith(".md"))) {
+      const path = join(seededAuditDir(fieldlessWt), name);
+      writeFileSync(path, readFileSync(path, "utf-8").replace(/^\*\*Source Fingerprint\*\*: .*\r?\n/gm, ""));
+    }
+    const fieldlessResult = runSwarm(modernFieldless, ["finalize", "--batch", "1", "--units", "fieldless", "--claimed", "fieldless", "--check-cmd", `"${process.execPath}" -e "process.exit(0)"`]);
+    expect(fieldlessResult.rc).toBe(2);
+    expect(fieldlessResult.out).toContain("has no Source Fingerprint");
+
+    const filtered = makeFixture();
+    git(filtered, ["config", "filter.tidy.clean", "sed 's/[[:space:]]*$//'"]);
+    writeFileSync(join(filtered, ".gitattributes"), "filtered.ts filter=tidy\n");
+    writeFileSync(join(filtered, "filtered.ts"), "export const filtered = 1;\n");
+    git(filtered, ["add", "-A"]); git(filtered, ["commit", "-qm", "filtered base"]);
+    runSwarm(filtered, ["prepare", "--batch", "1", "--units", "raw", "--base", "main"]);
+    const filteredWt = wtPath(filtered, "raw");
+    writeFileSync(join(filteredWt, "filtered.ts"), "export const filtered = 1;   \n");
+    recordReview(filteredWt, "code-generation", REVIEWER, "raw", "READY", []);
+    const filteredResult = runSwarm(filtered, ["finalize", "--batch", "1", "--units", "raw", "--claimed", "raw", "--check-cmd", `"${process.execPath}" -e "process.exit(0)"`]);
+    expect(filteredResult.rc).toBe(2);
+    expect(filteredResult.out).toContain("outside unit");
 
     const legacy = makeFixture();
     runSwarm(legacy, ["prepare", "--batch", "1", "--units", "legacy", "--base", "main"]);
@@ -1500,12 +1535,44 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
     ], { cwd: proj, encoding: "utf-8" });
     expect(discarded.status).toBe(0);
 
+    const resetSecond = Math.floor(Date.now() / 1000);
+    while (Math.floor(Date.now() / 1000) === resetSecond) {}
     expect(runSwarm(proj, ["prepare", "--batch", "2", "--units", "bypass", "--base", "main"]).rc).toBe(0);
     const redoneWt = wtPath(proj, "bypass");
     writeFileSync(join(redoneWt, "reviewed.ts"), "export const reviewed = 'redone';\n", "utf-8");
     git(redoneWt, ["add", "--", "reviewed.ts"]);
     git(redoneWt, ["commit", "-qm", "redo reviewed source"]);
-    recordReview(redoneWt, "code-generation", REVIEWER, "bypass");
+    const redoneArtifactDir = join(seededRecordDir(redoneWt), "construction", "bypass", "code-generation");
+    mkdirSync(redoneArtifactDir, { recursive: true });
+    for (const artifact of ["code-generation-plan.md", "unit-test-instructions.md", "code-summary.md"])
+      writeFileSync(join(redoneArtifactDir, artifact), `# ${artifact}\n`);
+    writeFileSync(join(redoneArtifactDir, "traceability.json"), "{}\n");
+    writeFileSync(join(redoneArtifactDir, "source-manifest.json"), `${JSON.stringify({stage:"code-generation",unit:"bypass",version:1,writes:[{path:"reviewed.ts"}]})}\n`);
+    const inherited = readAllAuditShards(redoneWt).replace(/\r\n/g, "\n");
+    const currentStart = inherited
+      .split(/\n---\n/)
+      .filter((block) =>
+        block.includes("**Event**: BOLT_STARTED") &&
+        block.includes("**Bolt slug**: bypass"),
+      )
+      .at(-1);
+    const floorTs = currentStart ? /\*\*Timestamp\*\*: (.+)/.exec(currentStart)?.[1] : undefined;
+    const priorRequests = inherited
+      .split(/\n---\n/)
+      .filter((block) => {
+        if (
+          !block.includes("**Event**: REVIEW_REQUESTED") ||
+          !block.includes("**Unit**: bypass")
+        ) return false;
+        const timestamp = /\*\*Timestamp\*\*: (.+)/.exec(block)?.[1];
+        return floorTs === undefined || (timestamp !== undefined && timestamp >= floorTs);
+      }).length;
+    const redoneIteration = String(priorRequests + 1);
+    const redoneArgs = [LOG,"review","--stage","code-generation","--reviewer",REVIEWER,"--unit","bypass","--iteration",redoneIteration,"--project-dir",redoneWt];
+    const req=spawnSync(BUN,redoneArgs,{encoding:"utf-8"});
+    if(req.status!==0) throw new Error(`${req.stdout}${req.stderr}`);
+    const done=spawnSync(BUN,[...redoneArgs,"--verdict","READY"],{encoding:"utf-8"});
+    if(done.status!==0) throw new Error(`${done.stdout}${done.stderr}`);
     const rebound = runSwarm(proj, [
       "finalize", "--batch", "2", "--units", "bypass", "--claimed", "bypass",
       "--check-cmd", `"${process.execPath}" -e "require('fs').accessSync('reviewed.ts')"`,

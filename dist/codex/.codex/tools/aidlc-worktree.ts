@@ -12,7 +12,9 @@
 // checkout.
 
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { appendAuditEntry } from "./aidlc-audit.ts";
 import {
@@ -22,13 +24,17 @@ import {
   errorMessage,
   findAllEvents,
   getField,
+  parseSourceListing,
   readAllAuditShards,
   reviewedSourceRefPrefix,
   resolveBoltDag,
   resolveConstructionRepo,
   resolveProjectDir,
+  serializeSourceListing,
+  sourceListingSha256,
   UNBINDABLE_FINGERPRINT,
   workspaceSourceFingerprint,
+  workspaceSourceListing,
   worktreePath,
   worktreeStateFilePath,
   writeFileAtomic,
@@ -42,6 +48,7 @@ const SLUG_RE = /^[a-z][a-z0-9-]*$/;
 
 const VALID_STRATEGIES = new Set(["squash", "merge", "rebase"]);
 const WORKTREE_META_FILENAME = "worktree-meta.json";
+const WORKTREE_BASE_LISTING_FILENAME = "base-source-listing.tsv";
 const VALID_VERIFY_EVENTS = new Set([
   "WORKTREE_CREATED",
   "WORKTREE_MERGED",
@@ -237,6 +244,24 @@ function resolveRepoCwd(
 // --repo (P7): the sibling repo to fork the worktree inside (a multi-repo intent
 // requires it; a single-repo intent infers the lone repo; a legacy intent with no
 // recorded repos runs in the projectDir, today's behaviour).
+function rawBaseSourceListing(
+  repoCwd: string,
+  baseCommit: string,
+): { serialized: string; hash: string } | null {
+  const temp = join(tmpdir(), `aidlc-base-listing-${process.pid}-${randomUUID().slice(0, 8)}`);
+  const created = runGit(["worktree", "add", "--detach", temp, baseCommit], repoCwd);
+  if (!created.ok) return null;
+  try {
+    const listing = workspaceSourceListing(temp);
+    if (listing === null) return null;
+    const serialized = serializeSourceListing(listing);
+    if (parseSourceListing(serialized) === null) return null;
+    return { serialized, hash: `sha256:${sourceListingSha256(serialized)}` };
+  } finally {
+    runGit(["worktree", "remove", "--force", temp], repoCwd);
+  }
+}
+
 function handleCreate(args: string[]): void {
   const flags = parseFlags(args);
   const slug = validateSlug(flags.slug);
@@ -267,6 +292,10 @@ function handleCreate(args: string[]): void {
   if (!/^[0-9a-f]{40,64}$/.test(baseCommit)) {
     errorWithSlug(slug, `Base branch resolved to an invalid commit id: ${flags.base}`);
   }
+  const rawBase = rawBaseSourceListing(repoCwd, baseCommit);
+  if (rawBase === null) {
+    errorWithSlug(slug, `Base source listing could not be computed for: ${flags.base}`);
+  }
 
   const wtPath = worktreePath(pd, slug);
   if (existsSync(wtPath)) {
@@ -290,6 +319,7 @@ function handleCreate(args: string[]): void {
       "Branch name": branchName,
       "Base branch": flags.base,
       "Base commit": baseCommit,
+      "Base Source Listing": rawBase.hash,
     }, flags.intent, flags.space);
   } catch (e) {
     errorWithSlug(slug, `Audit emission failed: ${errorMessage(e)}`);
@@ -307,8 +337,10 @@ function handleCreate(args: string[]): void {
   }
 
   const metaPath = join(wtPath, ".aidlc", WORKTREE_META_FILENAME);
+  const listingPath = join(wtPath, ".aidlc", WORKTREE_BASE_LISTING_FILENAME);
   try {
     mkdirSync(dirname(metaPath), { recursive: true });
+    writeFileAtomic(listingPath, rawBase.serialized);
     writeFileAtomic(
       metaPath,
       `${JSON.stringify(
@@ -317,6 +349,7 @@ function handleCreate(args: string[]): void {
           boltSlug: slug,
           baseBranch: flags.base,
           baseCommit,
+          baseSourceListing: rawBase.hash,
         },
         null,
         2,
@@ -334,6 +367,7 @@ function handleCreate(args: string[]): void {
       branch: branchName,
       base: flags.base,
       base_commit: baseCommit,
+      base_source_listing: rawBase.hash,
       audit_timestamp: auditTs,
     })
   );

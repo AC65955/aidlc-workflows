@@ -256,14 +256,18 @@ describe("t78 aidlc-bolt per-Bolt worktree lifecycle (migrated from t78-bolt-wor
       "attested",
     );
 
-    test("WORKTREE_CREATED and BOLT_STARTED carry the same immutable Base commit", () => {
+    test("WORKTREE_CREATED and BOLT_STARTED carry the same immutable Base commit and raw listing", () => {
       expect(created.status).toBe(0);
       expect(started.status).toBe(0);
       expect(eventBlock(proj, "WORKTREE_CREATED")).toContain(`**Base commit**: ${baseCommit}`);
       expect(eventBlock(proj, "BOLT_STARTED")).toContain(`**Base commit**: ${baseCommit}`);
-      expect(
-        readFileSync(join(worktreeDir(proj, "attested"), ".aidlc", "worktree-meta.json"), "utf-8"),
-      ).toContain(`"baseCommit": "${baseCommit}"`);
+      const meta = readFileSync(join(worktreeDir(proj, "attested"), ".aidlc", "worktree-meta.json"), "utf-8");
+      expect(meta).toContain(`"baseCommit": "${baseCommit}"`);
+      const baseListing = /"baseSourceListing": "(sha256:[0-9a-f]{64})"/.exec(meta)?.[1];
+      expect(baseListing).toBeDefined();
+      expect(eventBlock(proj, "WORKTREE_CREATED")).toContain(`**Base Source Listing**: ${baseListing}`);
+      expect(eventBlock(proj, "BOLT_STARTED")).toContain(`**Base Source Listing**: ${baseListing}`);
+      expect(existsSync(join(worktreeDir(proj, "attested"), ".aidlc", "base-source-listing.tsv"))).toBe(true);
     });
 
     test("malformed present metadata fails closed before BOLT_STARTED", () => {
@@ -280,7 +284,7 @@ describe("t78 aidlc-bolt per-Bolt worktree lifecycle (migrated from t78-bolt-wor
       expect(corruptCreated.status).toBe(0);
       writeFileSync(
         join(worktreeDir(corruptProj, "corrupt"), ".aidlc", "worktree-meta.json"),
-        '{"version":1,"boltSlug":"wrong","baseBranch":"main","baseCommit":"bad"}\n',
+        '{"version":1,"boltSlug":"wrong","baseBranch":"main","baseCommit":"bad","baseSourceListing":"bad"}\n',
       );
       const corruptStart = runBolt(
         corruptProj,

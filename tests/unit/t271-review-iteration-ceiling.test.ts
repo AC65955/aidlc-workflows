@@ -119,6 +119,13 @@ function writeReviewedArtifact(
   );
   writeFileSync(path, content, "utf-8");
   if (stage === "code-generation" && unit) {
+    const dagDir = join(seededRecordDir(proj), "inception", "units-generation");
+    mkdirSync(dagDir, { recursive: true });
+    writeFileSync(
+      join(dagDir, "unit-of-work-dependency.md"),
+      `\`\`\`yaml\nunits:\n  - name: ${unit}\n    depends_on: []\n\`\`\`\n`,
+      "utf-8",
+    );
     writeFileSync(
       join(dir, "source-manifest.json"),
       `${JSON.stringify({ stage, unit, version: 1, writes: [] }, null, 2)}\n`,
@@ -350,6 +357,13 @@ describe("t271 review iteration ceiling", () => {
 
   test("inline per-unit reviews remain subject to scope caps", () => {
     const proj = seedProject("bugfix");
+    const dagDir = join(seededRecordDir(proj), "inception", "units-generation");
+    mkdirSync(dagDir, { recursive: true });
+    writeFileSync(
+      join(dagDir, "unit-of-work-dependency.md"),
+      "```yaml\nunits:\n  - name: unit-alpha\n    depends_on: []\n```\n",
+      "utf-8",
+    );
     const ok = runReview(proj, [
       "--stage", "functional-design",
       "--reviewer", "aidlc-architecture-reviewer-agent",

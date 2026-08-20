@@ -18,6 +18,7 @@ import {
   errorMessage,
   extractMarkdownSection,
   freshReviewReceipts,
+  filterProducesByKind,
   getField,
   holdsAuditLock,
   humanActedSinceLastAnswer,
@@ -28,10 +29,12 @@ import {
   isNonAnswer,
   parseCheckboxes,
   readAllAuditShards,
+  readAuditShardEvents,
   readStateFile,
   readUnitSourceManifest,
   recordDir,
   relativeRecordDir,
+  resolveBoltDag,
   reviewArtifactFingerprint,
   resolveProjectDir,
   resolveReviewClass,
@@ -567,6 +570,7 @@ type ReviewAttemptSummary = {
   pendingIterations: Set<number>;
   recoveryIteration: number | null;
   recoverySpent: boolean;
+  ambiguity: string | null;
 };
 
 // Count requests in the current stage/unit attempt. The same chronological
@@ -575,7 +579,7 @@ type ReviewAttemptSummary = {
 // per-unit floor because the forked audit inherits the main workflow's prior
 // rows; it is also the proof that `--unit` belongs to an actual Bolt attempt.
 function reviewAttemptSummary(
-  audit: string,
+  projectDir: string,
   stateContent: string,
   stage: { slug: string; for_each?: string },
   reviewer: string,
@@ -595,21 +599,20 @@ function reviewAttemptSummary(
     "REVIEW_REQUESTED",
     "REVIEW_COMPLETED",
   ]);
-  const blocks = audit.replace(/\r\n/g, "\n").split(/\n---\n/);
-  const events: { pos: number; ts: string; event: string; block: string }[] = [];
-  for (let i = 0; i < blocks.length; i++) {
-    const event = auditBlockField(blocks[i], "Event");
-    if (!event || !relevant.has(event)) continue;
-    events.push({
-      pos: i,
-      ts: auditBlockField(blocks[i], "Timestamp") ?? "",
-      event,
-      block: blocks[i],
+  const events = readAuditShardEvents(projectDir)
+    .filter((row) => relevant.has(row.event))
+    .sort((a, b) => {
+      if (a.timestamp !== b.timestamp) return a.timestamp < b.timestamp ? -1 : 1;
+      if (a.shard === b.shard) return a.pos - b.pos;
+      return a.shardIndex - b.shardIndex;
     });
-  }
-  events.sort((a, b) =>
-    a.ts !== b.ts ? (a.ts < b.ts ? -1 : 1) : a.pos - b.pos
-  );
+  const tiedAcrossShards = (index: number): boolean =>
+    events.some(
+      (row, other) =>
+        other !== index &&
+        row.timestamp === events[index].timestamp &&
+        row.shard !== events[index].shard,
+    );
 
   const unitMajor =
     stage.for_each === "unit-of-work" &&
@@ -618,6 +621,7 @@ function reviewAttemptSummary(
   let boltStarted = false;
   let boltBatch: string | null = null;
   let boltSlug: string | null = null;
+  let ambiguity: string | null = null;
   for (let i = 0; i < events.length; i++) {
     const entry = events[i];
     if (workflow !== undefined) {
@@ -631,10 +635,12 @@ function reviewAttemptSummary(
       continue;
     }
     if (entry.event === "WORKFLOW_STARTED" || entry.event === "STAGE_JUMPED") {
+      if (tiedAcrossShards(i)) ambiguity = `cross-shard boundary tie at ${entry.timestamp}`;
       floor = i;
       boltStarted = false;
       boltBatch = null;
       boltSlug = null;
+      if (!tiedAcrossShards(i)) ambiguity = null;
       continue;
     }
     if (
@@ -643,10 +649,12 @@ function reviewAttemptSummary(
       unit !== undefined &&
       auditBlockField(entry.block, "Bolt slug") === unit
     ) {
+      if (tiedAcrossShards(i)) ambiguity = `cross-shard Bolt boundary tie at ${entry.timestamp}`;
       floor = i;
       boltStarted = true;
       boltBatch = auditBlockField(entry.block, "Batch number");
       boltSlug = auditBlockField(entry.block, "Bolt slug");
+      if (!tiedAcrossShards(i)) ambiguity = null;
       continue;
     }
     if (
@@ -663,6 +671,7 @@ function reviewAttemptSummary(
     }
     if (auditBlockField(entry.block, "Stage") !== stage.slug) continue;
     if (entry.event === "GATE_REJECTED") {
+      if (tiedAcrossShards(i)) ambiguity = `cross-shard gate boundary tie at ${entry.timestamp}`;
       floor = i;
       boltStarted = false;
       boltBatch = null;
@@ -672,6 +681,7 @@ function reviewAttemptSummary(
       !unitMajor &&
       !auditBlockField(entry.block, "Workflow")?.startsWith("single-stage:")
     ) {
+      if (tiedAcrossShards(i)) ambiguity = `cross-shard stage boundary tie at ${entry.timestamp}`;
       floor = i;
       boltStarted = false;
       boltBatch = null;
@@ -703,6 +713,10 @@ function reviewAttemptSummary(
     ) {
       continue;
     }
+    if (tiedAcrossShards(i)) {
+      ambiguity = `cross-shard review authority tie at ${entry.timestamp}`;
+      continue;
+    }
     const rawIteration = auditBlockField(entry.block, "Iteration");
     if (!rawIteration || !/^[1-9][0-9]*$/.test(rawIteration)) continue;
     const iteration = Number(rawIteration);
@@ -727,6 +741,7 @@ function reviewAttemptSummary(
     pendingIterations,
     recoveryIteration,
     recoverySpent,
+    ambiguity,
   };
 }
 
@@ -838,16 +853,47 @@ function handleReview(args: string[]): void {
     }
     const autonomousCandidate =
       flags.unit !== undefined && isAutonomousSwarmStage(pd, state, node);
+    const hasBoltBoundary =
+      flags.unit !== undefined &&
+      readAuditShardEvents(pd, intent, space).some(
+        (row) =>
+          row.event === "BOLT_STARTED" &&
+          auditBlockField(row.block, "Bolt slug") === flags.unit,
+      );
+    if (flags.unit && !autonomousCandidate && !hasBoltBoundary) {
+      const dag = resolveBoltDag(pd);
+      if (dag.state !== "ok" || !dag.units.includes(flags.unit)) {
+        refuseReview(
+          `Cannot record review for "${flags.stage}": unit "${flags.unit}" is not in the current resolved Unit DAG.`,
+        );
+      }
+      if (
+        filterProducesByKind(
+          node.produces_kinds,
+          node.produces ?? [],
+          dag.unitKinds?.get(flags.unit) ?? null,
+        ).length === 0
+      ) {
+        refuseReview(
+          `Cannot record review for "${flags.stage}": unit "${flags.unit}" has no applicable required outputs for its kind.`,
+        );
+      }
+    }
     const attempt = reviewAttemptSummary(
-      readAllAuditShards(pd, intent, space),
+      pd,
       state,
       node,
       flags.reviewer,
       flags.unit,
       fields.Workflow,
-      autonomousCandidate,
+      autonomousCandidate || hasBoltBoundary,
     );
     const declared = node.review_class ?? "adversarial";
+    if (attempt.ambiguity !== null) {
+      refuseReview(
+        `Cannot record review for "${flags.stage}": ${attempt.ambiguity} makes the current review attempt chronology ambiguous. Record a fresh stage/jump boundary, then request the review again.`,
+      );
+    }
     let reviewClass: ReviewClass | null = null;
     let budget: number | null = null;
     if (autonomousCandidate && attempt.boltStarted) {

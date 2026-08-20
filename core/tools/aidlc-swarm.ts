@@ -91,6 +91,7 @@ import {
   latestMainWorkflowStageRunFloor,
   latestMainWorkflowStageRunFloorForProject,
   parseArgs,
+  parseSourceListing,
   readAuditShardEvents,
   readAllAuditShards,
   readUnitSourceManifest,
@@ -103,6 +104,7 @@ import {
   resolveConstructionRepo,
   resolveProjectDir,
   resolveStage,
+  sourceListingSha256,
   terminalReviewVerdict,
   sourceClaimCovers,
   type SourceClaimModel,
@@ -112,6 +114,7 @@ import {
   worktreePath,
   worktreeRuntimeGraphPath,
   workspaceSourceFingerprint as worktreeSourceFingerprint,
+  workspaceSourceListing,
   worktreeStateFilePath,
 } from "./aidlc-lib.ts";
 import { compiledExecutable } from "./aidlc-runtime-paths.ts";
@@ -386,6 +389,8 @@ function reviewerReceiptError(
 
   const boltStartBlock = events[boltStart].block;
   const baseCommit = auditBlockField(boltStartBlock, "Base commit");
+  const baseSourceListing = auditBlockField(boltStartBlock, "Base Source Listing");
+  let verifiedBaseListing: Map<string, string> | null = null;
   if (baseCommit !== null) {
     const metaPath = join(wt, ".aidlc", "worktree-meta.json");
     let meta: unknown;
@@ -396,9 +401,25 @@ function reviewerReceiptError(
     }
     if (
       typeof meta !== "object" || meta === null || Array.isArray(meta) ||
-      (meta as Record<string, unknown>).baseCommit !== baseCommit
+      (meta as Record<string, unknown>).baseCommit !== baseCommit ||
+      baseSourceListing === null ||
+      (meta as Record<string, unknown>).baseSourceListing !== baseSourceListing
     ) {
-      return { error: `claimed converged but worktree Base commit does not match its BOLT_STARTED attestation for unit "${unit}"` };
+      return { error: `claimed converged but worktree Base commit/source listing does not match its BOLT_STARTED attestation for unit "${unit}"` };
+    }
+    const listingPath = join(wt, ".aidlc", "base-source-listing.tsv");
+    let serialized: string;
+    try {
+      serialized = readFileSync(listingPath, "utf-8");
+    } catch {
+      return { error: `claimed converged but worktree base source listing is missing for unit "${unit}"` };
+    }
+    if (`sha256:${sourceListingSha256(serialized)}` !== baseSourceListing) {
+      return { error: `claimed converged but worktree base source listing hash does not match for unit "${unit}"` };
+    }
+    verifiedBaseListing = parseSourceListing(serialized);
+    if (verifiedBaseListing === null) {
+      return { error: `claimed converged but worktree base source listing is malformed for unit "${unit}"` };
     }
   }
 
@@ -468,7 +489,14 @@ function reviewerReceiptError(
   if (!definition?.workspace_requires) return { error: null };
   const recordedSourceFp = auditBlockField(latestTerminal, "Source Fingerprint");
   if (process.env.AIDLC_SKIP_SOURCE_FRESHNESS === "1") return { error: null };
-  if (recordedSourceFp === null) return { error: null }; // pre-binding migration
+  if (recordedSourceFp === null) {
+    if (baseCommit === null) return { error: null }; // pre-binding worktree migration
+    return {
+      error:
+        `claimed converged but modern worktree unit "${unit}" has no Source Fingerprint; ` +
+        `re-run the reviewer in the worktree and record a fresh verdict before finalizing`,
+    };
+  }
   const currentSourceFp = worktreeSourceFingerprint(wt);
   if (
     recordedSourceFp === UNBINDABLE_FINGERPRINT ||
@@ -538,13 +566,26 @@ function reviewerReceiptError(
       if (tree.status !== 0 || !tree.stdout.trim()) return { error: `claimed converged but the worktree footprint tree could not be written for unit "${unit}"` };
       const diff = git(["diff", "--name-only", "-z", "--no-renames", baseCommit, tree.stdout.trim(), "--", ":(exclude,top)aidlc/**", ":(exclude,top).aidlc/**", ":(exclude,glob)**/aidlc/spaces/*/intents/**/.aidlc-sensors/**"]);
       if (diff.status !== 0) return { error: `claimed converged but the worktree footprint could not be compared for unit "${unit}"` };
-      const outside = diff.stdout
-        .split("\0")
-        .filter(Boolean)
+      const outside = new Set(
+        diff.stdout
+          .split("\0")
+          .filter(Boolean),
+      );
+      const currentListing = workspaceSourceListing(wt);
+      if (verifiedBaseListing === null || currentListing === null) {
+        return { error: `claimed converged but raw-aware worktree footprint evidence is unavailable for unit "${unit}"` };
+      }
+      for (const [path, oid] of verifiedBaseListing) {
+        if (currentListing.get(path) !== oid) outside.add(path.slice(path.indexOf("\0") + 1));
+      }
+      for (const path of currentListing.keys()) {
+        if (!verifiedBaseListing.has(path)) outside.add(path.slice(path.indexOf("\0") + 1));
+      }
+      const outsideClaims = [...outside]
         .filter((path) => !sourceClaimCovers(`\0${path}`, reviewedClaims));
-      if (outside.length > 0) {
-        const rendered = outside.slice(0, 10).join(", ") +
-          (outside.length > 10 ? ` … and ${outside.length - 10} more` : "");
+      if (outsideClaims.length > 0) {
+        const rendered = outsideClaims.slice(0, 10).join(", ") +
+          (outsideClaims.length > 10 ? ` … and ${outsideClaims.length - 10} more` : "");
         return {
           error:
             `claimed converged but the worktree wrote application-source paths outside unit "${unit}"'s ` +

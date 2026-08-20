@@ -178,10 +178,10 @@ function parseFlags(args: string[]): Record<string, string> {
   return flags;
 }
 
-function worktreeBaseCommit(
+function worktreeBaseFields(
   projectDir: string,
   slug: string,
-): string | null {
+): { baseCommit: string; baseSourceListing: string } | null {
   const metaPath = join(worktreePath(projectDir, slug), ".aidlc", "worktree-meta.json");
   if (!existsSync(metaPath)) return null; // pre-#662 worktree migration
 
@@ -195,7 +195,7 @@ function worktreeBaseCommit(
     throw new Error(`invalid worktree metadata at ${metaPath}: expected an object`);
   }
   const meta = value as Record<string, unknown>;
-  const allowed = new Set(["version", "boltSlug", "baseBranch", "baseCommit"]);
+  const allowed = new Set(["version", "boltSlug", "baseBranch", "baseCommit", "baseSourceListing"]);
   const unknown = Object.keys(meta).filter((key) => !allowed.has(key));
   if (unknown.length > 0) {
     throw new Error(
@@ -216,7 +216,16 @@ function worktreeBaseCommit(
   if (typeof meta.baseCommit !== "string" || !/^[0-9a-f]{40,64}$/.test(meta.baseCommit)) {
     throw new Error(`invalid worktree metadata at ${metaPath}: baseCommit must be a Git object id`);
   }
-  return meta.baseCommit;
+  if (
+    typeof meta.baseSourceListing !== "string" ||
+    !/^sha256:[0-9a-f]{64}$/.test(meta.baseSourceListing)
+  ) {
+    throw new Error(`invalid worktree metadata at ${metaPath}: baseSourceListing must be a sha256 fingerprint`);
+  }
+  return {
+    baseCommit: meta.baseCommit,
+    baseSourceListing: meta.baseSourceListing,
+  };
 }
 
 // --- Subcommand: start ---
@@ -263,11 +272,11 @@ function handleStart(args: string[]): void {
   // Validate state-file shape FIRST. setFieldStrict-equivalent: read state
   // and confirm we can find it; if not, fail before any audit emit so a
   // missing state file doesn't leave an orphan BOLT_STARTED.
-  let baseCommit: string | null = null;
+  let baseFields: { baseCommit: string; baseSourceListing: string } | null = null;
   if (useWorktree) {
     try {
       readStateFile(pd);
-      baseCommit = worktreeBaseCommit(pd, flags.slug);
+      baseFields = worktreeBaseFields(pd, flags.slug);
     } catch (e) {
       failJson("start-worktree", flags.slug, "state-or-worktree-meta-read-failed", errorMessage(e));
     }
@@ -285,7 +294,10 @@ function handleStart(args: string[]): void {
     };
     if (useWorktree) {
       fields["Bolt slug"] = flags.slug;
-      if (baseCommit !== null) fields["Base commit"] = baseCommit;
+      if (baseFields !== null) {
+        fields["Base commit"] = baseFields.baseCommit;
+        fields["Base Source Listing"] = baseFields.baseSourceListing;
+      }
     }
     emitAudit(pd, "BOLT_STARTED", fields, flags.intent, flags.space);
   } catch (e) {

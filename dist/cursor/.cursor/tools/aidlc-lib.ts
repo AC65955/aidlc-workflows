@@ -5070,19 +5070,48 @@ export function freshReviewReceipts(
   const perUnit = stage.for_each === "unit-of-work";
   const unitMajor =
     perUnit && getField(stateContent, "Construction Iteration")?.trim() === "unit-major";
+  const dag = perUnit ? options.boltDag ?? resolveBoltDag(projectDir) : null;
+  const applicableUnits: Set<string> | null = dag?.state === "ok" ? new Set() : null;
+  if (dag?.state === "ok" && applicableUnits !== null) {
+    for (const unit of dag.units) {
+      if (
+        filterProducesByKind(
+          stage.produces_kinds,
+          stage.produces ?? [],
+          dag.unitKinds?.get(unit) ?? null,
+        ).length > 0
+      ) applicableUnits.add(unit);
+    }
+  }
 
   let floorIdx = -1;
   for (let i = 0; i < events.length; i++) {
     const e = events[i];
-    if (e.event === "WORKFLOW_STARTED" || e.event === "STAGE_JUMPED") {
-      floorIdx = i;
-      continue;
+    let boundary = e.event === "WORKFLOW_STARTED" || e.event === "STAGE_JUMPED";
+    if (!boundary && auditBlockField(e.block, "Stage") === stage.slug) {
+      boundary = e.event === "GATE_REJECTED" || (
+        e.event === "STAGE_STARTED" &&
+        !unitMajor &&
+        !auditBlockField(e.block, "Workflow")?.startsWith("single-stage:")
+      );
     }
-    if (auditBlockField(e.block, "Stage") !== stage.slug) continue;
-    if (e.event === "STAGE_STARTED" && !unitMajor) {
-      if (auditBlockField(e.block, "Workflow")?.startsWith("single-stage:")) continue;
-      floorIdx = i;
-    } else if (e.event === "GATE_REJECTED") {
+    if (!boundary) continue;
+    const tiedCrossShard = events.some(
+      (candidate, index) =>
+        index !== i &&
+        candidate.timestamp === e.timestamp &&
+        candidate.shard !== e.shard,
+    );
+    // A boundary involved in a cross-shard same-second tie floors the entire
+    // timestamp group. No receipt or artifact row in that unordered group may
+    // survive based on shard filename order. A later unambiguous boundary
+    // restores ordinary accounting.
+    if (tiedCrossShard) {
+      let end = i;
+      while (end + 1 < events.length && events[end + 1].timestamp === e.timestamp) end++;
+      floorIdx = end;
+      i = end;
+    } else {
       floorIdx = i;
     }
   }
@@ -5100,7 +5129,13 @@ export function freshReviewReceipts(
   const unitPending = new Map<string, PendingReviewProgress>();
   const pendingRequests = new Map<
     string,
-    { unit: string | undefined; iteration: number; recovery: boolean }
+    {
+      unit: string | undefined;
+      iteration: number;
+      recovery: boolean;
+      timestamp: string;
+      shard: string;
+    }
   >();
   const modernUnitReceipts = new Map<
     string,
@@ -5181,8 +5216,14 @@ export function freshReviewReceipts(
     if (!iterationField || !/^[1-9][0-9]*$/.test(iterationField)) continue;
     const iteration = Number(iterationField);
     const unit = auditBlockField(e.block, "Unit") || undefined;
+    if (
+      perUnit &&
+      applicableUnits !== null &&
+      (unit === undefined || !applicableUnits.has(unit))
+    ) continue;
     const requestKey = `${unit ?? ""}\u0000${iterationField}`;
     if (e.event === "REVIEW_REQUESTED") {
+      if (eventIsCrossShardTied(i)) continue;
       const previous = pendingRequests.get(requestKey);
       const recovery =
         previous?.recovery === true ||
@@ -5192,13 +5233,23 @@ export function freshReviewReceipts(
         unit,
         iteration,
         recovery,
+        timestamp: e.timestamp,
+        shard: e.shard,
       });
       continue;
     }
     const verdict = auditBlockField(e.block, "Verdict");
     if (verdict !== "READY" && verdict !== "NOT-READY") continue;
+    if (eventIsCrossShardTied(i)) {
+      pendingRequests.delete(requestKey);
+      continue;
+    }
     const request = pendingRequests.get(requestKey);
-    if (!request || !pendingRequests.delete(requestKey)) continue;
+    if (
+      !request ||
+      (request.timestamp === e.timestamp && request.shard !== e.shard) ||
+      !pendingRequests.delete(requestKey)
+    ) continue;
     const recordedFingerprint = auditBlockField(e.block, "Artifact Fingerprint");
     const artifactFingerprintUsable =
       recordedFingerprint !== null &&
@@ -5227,7 +5278,7 @@ export function freshReviewReceipts(
       // A below-cap NOT-READY is repair progress, not a freshness boundary;
       // otherwise the expected repair edit would consume recovery prematurely.
       const sourceFingerprint = auditBlockField(e.block, "Source Fingerprint");
-      if (sourceFingerprint) {
+      if (sourceFingerprint && !eventIsCrossShardTied(i)) {
         newestSourceFingerprint = sourceFingerprint;
         newestSourceUnit = unit ?? null;
         newestSourceProgress = {
@@ -6018,7 +6069,7 @@ export function serializeSourceListing(listing: ReadonlyMap<string, string>): st
   return rows.length === 0 ? "" : `${rows.map((row) => row.line).join("\n")}\n`;
 }
 
-function parseSourceListing(serialized: string): WorkspaceSourceListing | null {
+export function parseSourceListing(serialized: string): WorkspaceSourceListing | null {
   if (serialized === "") return new Map();
   if (!serialized.endsWith("\n")) return null;
   const listing: WorkspaceSourceListing = new Map();
@@ -6043,7 +6094,7 @@ function parseSourceListing(serialized: string): WorkspaceSourceListing | null {
   return listing;
 }
 
-function sourceListingSha256(serialized: string): string {
+export function sourceListingSha256(serialized: string): string {
   return createHash("sha256").update(serialized, "utf-8").digest("hex");
 }
 

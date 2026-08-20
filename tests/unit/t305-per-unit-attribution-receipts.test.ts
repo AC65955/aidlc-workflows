@@ -269,6 +269,7 @@ describe("t305 real receipt and guard flows", () => {
     const late = runtimeFixture(); const state=join(late.record,"aidlc-state.md"); writeFileSync(state,readFileSync(state,"utf-8").replace("stage-major","unit-major"));
     writeFileSync(join(late.project,"late.ts"),"export const late=1\n");
     const now=workspaceSourceListing(late.project)!; appendAuditEntry("STAGE_STARTED",{Workflow:"single-stage:code-generation",Stage:"code-generation",Agent:"aidlc-developer-agent","Source Baseline":writeBaselineSourceSnapshot(late.project,"code-generation",now)},late.project);
+    const syntheticSecond=Math.floor(Date.now()/1000); while(Math.floor(Date.now()/1000)===syntheticSecond){}
     review(late.project,late.record,"alpha",[{path:"app.ts"}]); review(late.project,late.record,"beta",[]); const lateState=readFileSync(state,"utf-8"); const lateReceipts=freshReviewReceipts(late.project,lateState,{slug:"code-generation",phase:"construction",for_each:"unit-of-work",reviewer:REVIEWER,reviewer_max_iterations:2,workspace_requires:true,produces:["code-generation-plan","unit-test-instructions","code-summary","traceability"]}); expect(lateReceipts.sourceBaseline.state).toBe("ready"); if (lateReceipts.sourceBaseline.state === "ready") expect(lateReceipts.sourceBaseline.listing.has("\0late.ts")).toBe(false); expect(approve(late.project).out).toContain("late.ts");
     const destroyed=runtimeFixture(); review(destroyed.project,destroyed.record,"alpha",[{path:"app.ts"}]); review(destroyed.project,destroyed.record,"beta",[]);
     const audit=readAllAuditShards(destroyed.project); const hash=/\*\*Source Baseline\*\*: sha256:([0-9a-f]{64})/.exec(audit)![1]; rmSync(join(destroyed.record,".aidlc-source-review","code-generation",`baseline-${hash.slice(0,12)}.tsv`)); expect(approve(destroyed.project).out).toContain("baseline snapshot is missing");
@@ -292,6 +293,33 @@ describe("t305 real receipt and guard flows", () => {
 
   test("absent exact claim becomes stale when the path appears before an unrelated review", () => {
     const {project,record}=runtimeFixture(); review(project,record,"alpha",[{path:"future.ts"}]); writeFileSync(join(project,"future.ts"),"future\n"); review(project,record,"beta",[{path:"app.ts"}]); expect(approve(project).out).toContain("Invalidated receipts: alpha");
+  });
+
+  test("ghost/non-applicable units cannot mint review authority or cover unclaimed source", () => {
+    const {project,record}=runtimeFixture();
+    review(project,record,"alpha",[{path:"app.ts"}]); review(project,record,"beta",[]);
+    writeFileSync(join(project,"extra.ts"),"extra\n");
+    writeManifest(record,"ghost",[{path:"extra.ts"}]);
+    const ghost=cli(LOG,["review","--stage","code-generation","--reviewer",REVIEWER,"--unit","ghost","--iteration","1"],project);
+    expect(ghost.rc).toBe(1); expect(ghost.out).toContain("not in the current resolved Unit DAG");
+    const forgedState=readFileSync(join(record,"aidlc-state.md"),"utf-8");
+    const receipts=freshReviewReceipts(project,forgedState,{slug:"code-generation",phase:"construction",for_each:"unit-of-work",reviewer:REVIEWER,reviewer_max_iterations:2,workspace_requires:true,produces:["code-generation-plan","unit-test-instructions","code-summary","traceability"]});
+    expect(receipts.freshUnitClaims.has("ghost")).toBe(false);
+  });
+
+  test("stage-major selects the tighter STAGE_STARTED baseline", () => {
+    const {project,record}=runtimeFixture();
+    // Replace the fixture's equal workflow/stage snapshots with a workflow
+    // baseline, a pre-stage source addition, and a tighter stage baseline.
+    const auditDir=join(record,"audit"); rmSync(auditDir,{recursive:true,force:true}); mkdirSync(auditDir,{recursive:true});
+    const workflow=writeBaselineSourceSnapshot(project,"code-generation",workspaceSourceListing(project)!);
+    appendAuditEntry("WORKFLOW_STARTED",{Scope:"feature","Source Baseline":workflow},project);
+    writeFileSync(join(project,"prestage.ts"),"pre\n");
+    const stageBaseline=writeBaselineSourceSnapshot(project,"code-generation",workspaceSourceListing(project)!);
+    appendAuditEntry("STAGE_STARTED",{Stage:"code-generation",Agent:"aidlc-developer-agent","Source Baseline":stageBaseline},project);
+    const second=Math.floor(Date.now()/1000); while(Math.floor(Date.now()/1000)===second){}
+    writeFileSync(join(project,"later.ts"),"later\n"); review(project,record,"alpha",[{path:"app.ts"}]); review(project,record,"beta",[]);
+    const out=approve(project).out; expect(out).toContain("later.ts"); expect(out).not.toContain("prestage.ts");
   });
 
   test("calls freshReviewReceipts directly for a modern unit chain", () => {
