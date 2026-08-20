@@ -21,6 +21,7 @@ import {
   findStageBySlug,
   findAllEvents,
   firstInScopeStageOfPhase,
+  formatReceivedReply,
   freshReviewReceipts,
   getField,
   hasUnsafeSingleLineCharacter,
@@ -2548,7 +2549,9 @@ function handleApprove(args: string[]): void {
     !approvalInput
   ) {
     error(
-      `Refusing to approve "${slug}": --user-input must contain the human's exact approval choice.`,
+      `Refusing to approve "${slug}": received reply ${formatReceivedReply(approvalInput)} ` +
+        'did not match an offered choice. Valid choices are "Approve" or "Request Changes". ' +
+        "Re-present those choices and wait for the human to choose one.",
     );
   }
   // Cancellation boilerplate is not an approval choice: a dismissed/timed-out
@@ -2561,9 +2564,10 @@ function handleApprove(args: string[]): void {
     isNonAnswer(approvalInput)
   ) {
     error(
-      `Refusing to approve "${slug}": --user-input "${approvalInput}" is cancellation boilerplate, ` +
-        "not an approval. If the human dismissed the gate question, re-present it and wait for a " +
-        "real choice; a dismissal is not consent.",
+      `Refusing to approve "${slug}": received reply ${formatReceivedReply(approvalInput)} ` +
+        'did not match an offered choice because it is cancellation boilerplate. Valid choices ' +
+        'are "Approve" or "Request Changes". Re-present those choices and wait for the human ' +
+        "to choose one; a dismissal is not consent.",
     );
   }
   // Nor is the conductor's OWN decision an approval. The presence guard below
@@ -2775,7 +2779,9 @@ function handleReject(args: string[]): void {
   const feedback = getFlagValue(args.slice(1), "--feedback")?.trim();
   if (!feedback) {
     error(
-      `Refusing to reject "${slug}": --feedback must contain the human's requested changes.`,
+      `Refusing to reject "${slug}": received reply ${formatReceivedReply(feedback)} did not ` +
+        'match an offered choice. Valid choices are "Approve" or "Request Changes". ' +
+        "Re-present those choices and wait for the human to choose one.",
     );
   }
   // Same non-answer floor as approve: a dismissed gate question is neither an
@@ -2783,9 +2789,10 @@ function handleReject(args: string[]): void {
   // the revision loop on cancellation boilerplate.
   if (isNonAnswer(feedback)) {
     error(
-      `Refusing to reject "${slug}": --feedback "${feedback}" is cancellation boilerplate, not a ` +
-        "change request. If the human dismissed the gate question, re-present it and wait for a " +
-        "real choice.",
+      `Refusing to reject "${slug}": received reply ${formatReceivedReply(feedback)} did not ` +
+        'match an offered choice because it is cancellation boilerplate. Valid choices are ' +
+        '"Approve" or "Request Changes". Re-present those choices and wait for the human to ' +
+        "choose one.",
     );
   }
 

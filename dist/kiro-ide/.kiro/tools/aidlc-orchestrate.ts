@@ -5652,7 +5652,9 @@ function handleReport(args: string[], projectDir: string | undefined): void {
       const feedback = (flags.userInput ?? flags.reason)?.trim();
       if (!feedback) {
         emit(errorDirective(
-          `report --result rejected for "${slug}" requires nonblank --user-input or --reason feedback.`,
+          `report --result rejected for "${slug}" received an empty reply, which did not match ` +
+            'an offered choice. Valid choices are "Approve" or "Request Changes". Re-present ' +
+            "those choices and wait for the human to choose one.",
         ));
         return;
       }
@@ -5722,7 +5724,9 @@ function handleReport(args: string[], projectDir: string | undefined): void {
     !flags.userInput?.trim()
   ) {
     emit(errorDirective(
-      `report --result ${flags.result} for "${slug}" requires --user-input with the human's exact approval choice.`,
+      `report --result ${flags.result} for "${slug}" received an empty reply, which did not ` +
+        'match an offered choice. Valid choices are "Approve" or "Request Changes". Re-present ' +
+        "those choices and wait for the human to choose one.",
     ));
     return;
   }

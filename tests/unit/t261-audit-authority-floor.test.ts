@@ -1,4 +1,4 @@
-// covers: cli:aidlc-audit(append-protected,append-batch-protected,append-raw-event-line,reserved-field-keys), subcommand:aidlc-bolt:set-autonomy, function:humanActedSinceGate, function:hasUnsafeSingleLineCharacter, function:isNonAnswer, function:selfAttributedDecisionMarker, function:isAutonomousConstructionDecision
+// covers: cli:aidlc-audit(append-protected,append-batch-protected,append-raw-event-line,reserved-field-keys), subcommand:aidlc-bolt:set-autonomy, function:humanActedSinceGate, function:hasUnsafeSingleLineCharacter, function:isNonAnswer, function:formatReceivedReply, function:selfAttributedDecisionMarker, function:isAutonomousConstructionDecision
 //
 // t261 — the authority floor on the audit surface (issue 681, claims 3/4/7/8).
 // Four related guarantees, each with a REFUSE case and an ALLOW case so the
@@ -457,8 +457,37 @@ describe("t261 cancellation boilerplate is not a decision", () => {
     for (const details of ["Cancelled", "cancelled", "user dismissed", "Timed out", "   "]) {
       const r = guarded(LOG, ["answer", "--stage", "feasibility", "--details", details], proj);
       expect(r.rc).not.toBe(0);
+      expect(r.out).toContain("received reply");
     }
     expect(readAllAuditShards(proj)).not.toContain("QUESTION_ANSWERED");
+  });
+
+  test("summary confirmation refusal quotes and truncates the reply and names both valid choices", () => {
+    proj = ideationProject();
+    const invalid = `Use the defaults ${"x".repeat(180)}`;
+    const r = guarded(
+      LOG,
+      [
+        "answer",
+        "--stage",
+        "feasibility",
+        "--checkpoint",
+        "summary-confirmation",
+        "--questions-file",
+        "unused.md",
+        "--details",
+        invalid,
+      ],
+      proj,
+    );
+    expect(r.rc).not.toBe(0);
+    expect(r.out).toContain('received reply \\"Use the defaults ');
+    expect(r.out).toContain('...\\"');
+    expect(r.out).not.toContain(invalid);
+    expect(r.out).toContain(
+      'Valid choices are \\"Looks correct\\" or \\"Request changes\\"',
+    );
+    expect(readAllAuditShards(proj)).not.toContain("SUMMARY_CONFIRMATION_RECORDED");
   });
 
   test("a substantive answer containing a cancellation word passes", () => {
@@ -481,11 +510,19 @@ describe("t261 cancellation boilerplate is not a decision", () => {
 
     const ap = guarded(STATE, ["approve", "feasibility", "--user-input", "cancelled"], proj, direct);
     expect(ap.rc).not.toBe(0);
+    expect(ap.out).toContain('received reply \\"cancelled\\"');
     expect(ap.out).toContain("cancellation boilerplate");
+    expect(ap.out).toContain(
+      'Valid choices are \\"Approve\\" or \\"Request Changes\\"',
+    );
 
     const rj = guarded(STATE, ["reject", "feasibility", "--feedback", "Timed out"], proj, direct);
     expect(rj.rc).not.toBe(0);
+    expect(rj.out).toContain('received reply \\"Timed out\\"');
     expect(rj.out).toContain("cancellation boilerplate");
+    expect(rj.out).toContain(
+      'Valid choices are \\"Approve\\" or \\"Request Changes\\"',
+    );
 
     // the real choice still commits (same turn: neither refusal consumed it)
     const ok = guarded(STATE, ["approve", "feasibility", "--user-input", "Approve"], proj, direct);

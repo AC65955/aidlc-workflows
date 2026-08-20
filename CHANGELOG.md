@@ -1,6 +1,15 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [2.6.19] - 2026-08-20
+
+A checkpoint or approval-gate reply that matches none of the offered choices is now acknowledged explicitly instead of the prompt being silently repeated: the framework quotes the received reply, states that it did not match an offered choice, and restates the valid choices in the same turn. The non-matching reply is not recorded as a decision and does not consume the human's gate turn — the next valid choice commits without re-proving presence. No upgrade action beyond refreshing your `dist/<harness>/` shell.
+
+* Approval-gate refusals (`aidlc-state.ts approve`/`reject`, `aidlc-orchestrate.ts report --result approved/rejected`) and the summary-confirmation refusal (`aidlc-log.ts answer --checkpoint summary-confirmation`) now name the received reply (whitespace-normalized, truncated to 120 characters) and restate the exact valid choices: `Approve` / `Request Changes` for gates, `Looks correct` / `Request changes` for summary confirmation.
+* Cancellation-boilerplate refusals (dismissed or timed-out gate widgets) use the same quoted-reply, choices-restated form.
+* The shared stage protocol and every harness orchestrator skill gain a "Non-matching checkpoint replies" rule: acknowledge the reply, restate every valid choice in the same turn, record nothing, and never silently re-render the prompt.
+* Invalid replies leave the gate open and unresolved: no `GATE_APPROVED`/`GATE_REJECTED` event, no summary-confirmation receipt, and no consumed human turn.
+
 ## [2.6.18] - 2026-08-19
 
 Classic and Express are new scope options, and the implicit default scope is now Classic — a **declared behavior change**: invocations that name no scope and match no keyword now run the v1-style lifecycle without Ideation instead of the full-lifecycle Feature scope. Exactly two things control the implicit default: the `AWS_AIDLC_DEFAULT_SCOPE` env var (which overrides) and the framework's hard-coded `classic` fallback. Express has a deterministic requirements-to-conditional-deploy path, and conditional protocol modules reduce fixed context without dropping reviewer recovery behavior. **Upgrade:** refresh your `dist/<harness>/` shell; in-flight workflows keep their persisted scope and need no migration; set `AWS_AIDLC_DEFAULT_SCOPE=feature` (Claude: the `.claude/settings.json` `env` block, which now ships `classic`) to keep the previous full-lifecycle default.

@@ -150,6 +150,17 @@ options:
 
 CONSTRUCTION and OPERATION stages: Strictly 2-option only (Approve / Request Changes).
 
+### Non-matching checkpoint replies
+
+For an approval gate or the consolidated-summary confirmation, compare the
+human's reply only with the choices currently offered. If it matches none of
+them, do not call `aidlc-orchestrate.ts report` or `aidlc-log.ts answer`, do not
+write it to an `[Answer]:` tag, and do not treat the checkpoint as resolved.
+In the same turn, acknowledge the received reply (quote it briefly, truncating
+long text), state that it did not match an offered choice, and re-present the
+same structured question with every valid choice. Then end the turn and wait.
+Never silently repeat a checkpoint prompt after an unmatched reply.
+
 ### Revision loop escape hatch
 After 3 "Request Changes" cycles on the same stage, add a third option to all subsequent approval gates for that stage:
 
@@ -352,6 +363,9 @@ Log the user's mode choice to `<record>/audit/<host>-<clone>.md` using the Quest
   --details "<exact choice>"` using the same `--unit` / `--single` identity.
   The tool refuses a self-selected answer, a response without a matching prompt
   record and later human turn, or a questions file whose stored choice differs.
+  A reply other than **Looks correct** or **Request changes** follows the
+  non-matching checkpoint rule in §1: acknowledge it, restate both choices, and
+  leave the tag and receipt untouched.
 
   If the choice is **Request changes**, append a sibling
   `## Requested Changes Feedback` question with a blank `[Answer]:`, ask the

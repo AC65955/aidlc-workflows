@@ -138,6 +138,11 @@ field (the display name of the next in-scope stage, computed by the engine at
 emit time), or `Complete workflow` when `next_stage` is null. The conductor
 never guesses the next stage.
 
+If a reply matches none of the choices currently shown, the conductor quotes
+the received reply briefly, says that it did not match an offered choice, and
+re-presents every valid choice in the same turn. It does not report a lifecycle
+transition, record a decision, or consume the gate turn for that reply.
+
 **No Emergent Behavior Rule:** Construction and Operation stages (phases 3-4)
 must always use this 2-option format. They must never introduce additional
 navigation options.
@@ -342,7 +347,9 @@ Log the mode choice to the `audit/` shards. Users can switch modes mid-stage.
   matching `aidlc-log.ts answer` command. The receipt binds the human turn to
   the exact questions-file digest. On **Request changes**, ask **"What should
   change?"** and stop again before editing any answer; after feedback and
-  revision, reset the confirmation to blank before re-prompting.
+  revision, reset the confirmation to blank before re-prompting. Any other
+  reply is acknowledged as not matching an offered choice, both valid choices
+  are re-presented in the same turn, and neither the tag nor receipt is written.
 
 #### Edit File (Self-Guided Mode)
 

@@ -96,6 +96,7 @@ import {
   seedStateFile,
   resetAidlcEnv,
 } from "../harness/fixtures.ts";
+import { appendAuditEntry } from "../../dist/claude/.claude/tools/aidlc-audit.ts";
 
 const BUN = process.execPath; // the bun running this test
 const REPO_ROOT = join(import.meta.dir, "..", "..");
@@ -118,8 +119,12 @@ interface CliResult {
   stdout: string;
 }
 
-function run(tool: string, args: string[]): CliResult {
-  const res = spawnSync(BUN, [tool, ...args], { encoding: "utf-8" });
+function run(
+  tool: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): CliResult {
+  const res = spawnSync(BUN, [tool, ...args], { encoding: "utf-8", env });
   const stdout = res.stdout ?? "";
   return {
     status: res.status ?? -1,
@@ -479,6 +484,55 @@ describe("t118 differential corpus — engine vs aidlc-jump resolve (migrated fr
       p,
     ]);
     expect(directive(r).kind).toBe("done");
+  }, 30000);
+
+  test("SP7-invalid: a dismissed gate reply is acknowledged, leaves the gate open, and does not consume the retry", () => {
+    const p = projWithState("state-mid-ideation.md");
+    const guardedEnv = { ...process.env };
+    delete guardedEnv.AIDLC_SKIP_HUMAN_PRESENCE_GUARD;
+    run(ORCHESTRATE, [
+      "report",
+      "--stage",
+      "feasibility",
+      "--result",
+      "awaiting-approval",
+      "--project-dir",
+      p,
+    ]);
+    appendAuditEntry("HUMAN_TURN", {}, p);
+
+    const invalid = directive(
+      run(ORCHESTRATE, [
+        "report",
+        "--result",
+        "approved",
+        "--user-input",
+        "cancelled",
+        "--project-dir",
+        p,
+      ], guardedEnv),
+    );
+    expect(invalid.kind).toBe("error");
+    expect(invalid.message).toContain('received reply \\"cancelled\\"');
+    expect(invalid.message).toContain(
+      'Valid choices are \\"Approve\\" or \\"Request Changes\\"',
+    );
+    expect(readFileSync(statePath(p), "utf-8")).toContain("- [?] feasibility");
+    expect(eventCount(p, "GATE_APPROVED")).toBe(0);
+
+    const accepted = directive(
+      run(ORCHESTRATE, [
+        "report",
+        "--result",
+        "approved",
+        "--user-input",
+        "Approve",
+        "--project-dir",
+        p,
+      ], guardedEnv),
+    );
+    expect(accepted.kind).toBe("done");
+    expect(eventCount(p, "GATE_APPROVED")).toBe(1);
   }, 30000);
 
   // ============================================================
