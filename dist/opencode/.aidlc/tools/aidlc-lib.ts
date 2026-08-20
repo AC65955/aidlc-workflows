@@ -5036,9 +5036,6 @@ export function freshReviewReceipts(
   if (reviewClass === "none") return empty;
   const maxIterations =
     reviewClass === "advisory" ? 1 : stage.reviewer_max_iterations ?? 2;
-  const audit = readAllAuditShards(projectDir);
-  if (audit.length === 0) return empty;
-
   const RELEVANT = new Set([
     "WORKFLOW_STARTED",
     "STAGE_STARTED",
@@ -5049,14 +5046,26 @@ export function freshReviewReceipts(
     "REVIEW_REQUESTED",
     "REVIEW_COMPLETED",
   ]);
-  const blocks = audit.replace(/\r\n/g, "\n").split(/\n---\n/);
-  const events: { pos: number; ts: string; event: string; block: string }[] = [];
-  for (let i = 0; i < blocks.length; i++) {
-    const ev = auditBlockField(blocks[i], "Event");
-    if (!ev || !RELEVANT.has(ev)) continue;
-    events.push({ pos: i, ts: auditBlockField(blocks[i], "Timestamp") ?? "", event: ev, block: blocks[i] });
-  }
-  events.sort((a, b) => (a.ts !== b.ts ? (a.ts < b.ts ? -1 : 1) : a.pos - b.pos));
+  const events = readAuditShardEvents(projectDir)
+    .filter((row) => RELEVANT.has(row.event))
+    .sort((a, b) => {
+      if (a.timestamp !== b.timestamp) return a.timestamp < b.timestamp ? -1 : 1;
+      // Same-shard ties have real append order. Cross-shard ties remain
+      // adjacent but causally unordered; authority-sensitive consumers below
+      // fail closed instead of trusting shard filename order.
+      if (a.shard === b.shard) return a.pos - b.pos;
+      return a.shardIndex - b.shardIndex;
+    });
+  if (events.length === 0) return empty;
+  const eventIsCrossShardTied = (index: number): boolean => {
+    const event = events[index];
+    return events.some(
+      (candidate, otherIndex) =>
+        otherIndex !== index &&
+        candidate.timestamp === event.timestamp &&
+        candidate.shard !== event.shard,
+    );
+  };
 
   const perUnit = stage.for_each === "unit-of-work";
   const unitMajor =
@@ -5099,6 +5108,8 @@ export function freshReviewReceipts(
       fingerprint: string | null;
       bypass: boolean;
       order: number;
+      timestamp: string;
+      shard: string;
       iteration: number;
       recovery: boolean;
     }
@@ -5273,6 +5284,8 @@ export function freshReviewReceipts(
         fingerprint: auditBlockField(e.block, "Unit Source Fingerprint"),
         bypass: auditBlockField(e.block, "Unit Source Binding Bypass") === "true",
         order: i,
+        timestamp: e.timestamp,
+        shard: e.shard,
         iteration,
         recovery: request.recovery,
       });
@@ -5322,7 +5335,31 @@ export function freshReviewReceipts(
     const receiptsNewestFirst = [...modernUnitReceipts.entries()]
       .filter(([unit]) => unitVerdicts.has(unit))
       .sort((a, b) => b[1].order - a[1].order);
+    const ambiguousReceiptTimes = new Set(
+      receiptsNewestFirst
+        .filter(([, receipt], index, all) =>
+          all.some(
+            ([, other], otherIndex) =>
+              otherIndex !== index &&
+              other.timestamp === receipt.timestamp &&
+              other.shard !== receipt.shard,
+          ),
+        )
+        .map(([, receipt]) => receipt.timestamp),
+    );
     for (const [unit, receipt] of receiptsNewestFirst) {
+      // Shielding needs a real newest claimant. Equal-second receipts from
+      // different shards are causally unordered, so invalidate that tied set
+      // rather than let shard filename order choose authority.
+      if (ambiguousReceiptTimes.has(receipt.timestamp)) {
+        unitVerdicts.delete(unit);
+        unitStale.add(unit);
+        unitStaleProgress.set(unit, {
+          nextIteration: receipt.iteration + 1,
+          recoverySpent: receipt.recovery,
+        });
+        continue;
+      }
       // No modern binding marker at all is migration evidence: keep the #629
       // global policy for this unit and do not invent claims from current bytes.
       if (receipt.fingerprint === null && !receipt.bypass) continue;
@@ -5351,12 +5388,16 @@ export function freshReviewReceipts(
             }
           }
           if (!stale) {
-            // A directory prefix binds future additions too: anything currently
-            // inside it but absent from the reviewed snapshot needs a newer
-            // validated claimant or invalidates this receipt.
+            // Both exact and directory claims bind future additions. An exact
+            // claim that was absent at review cannot launder a later-created
+            // path; over-claiming therefore invalidates more receipts, never
+            // fewer. A newer validated claimant may still shield the path.
             for (const [pathKey] of currentSourceListing) {
-              if (!manifest.prefixes.some((prefix) => pathKey.startsWith(prefix))) continue;
-              if (reviewedListing.has(pathKey)) continue;
+              const newlyPresentExact = manifest.claims.has(pathKey) && !reviewedListing.has(pathKey);
+              const newlyPresentUnderPrefix =
+                manifest.prefixes.some((prefix) => pathKey.startsWith(prefix)) &&
+                !reviewedListing.has(pathKey);
+              if (!newlyPresentExact && !newlyPresentUnderPrefix) continue;
               if (newerFreshClaims.some((claims) => sourceClaimCovers(pathKey, claims))) continue;
               stale = true;
               break;
@@ -5391,18 +5432,21 @@ export function freshReviewReceipts(
     }
   }
 
-  // Anchor the unclaimed-path baseline to the stage's real entry. A late
-  // unit-major STAGE_STARTED is ignored because first work evidence already
-  // precedes it; GATE_REJECTED never re-anchors cumulative manifests.
+  // Anchor the unclaimed-path baseline to the stage's real entry. Unit-major
+  // NEVER trusts STAGE_STARTED because shell/generator source writes can precede
+  // that row without ARTIFACT_* evidence. GATE_REJECTED never re-anchors
+  // cumulative manifests. Synthetic single-stage rows cannot affect the floor.
   let sourceBaseline: SourceBaselineResult = { state: "legacy" };
   if (stage.workspace_requires === true) {
     let boundary = -1;
     for (let i = 0; i < events.length; i++) {
+      if (auditBlockField(events[i].block, "Workflow")?.startsWith("single-stage:")) continue;
       if (events[i].event === "WORKFLOW_STARTED" || events[i].event === "STAGE_JUMPED") boundary = i;
     }
     let firstWork = events.length;
     for (let i = Math.max(boundary, 0); i < events.length; i++) {
       const event = events[i];
+      if (auditBlockField(event.block, "Workflow")?.startsWith("single-stage:")) continue;
       if (auditBlockField(event.block, "Stage") !== stage.slug) continue;
       if (event.event === "REVIEW_REQUESTED") {
         firstWork = i;
@@ -5419,13 +5463,17 @@ export function freshReviewReceipts(
     let baselineField: string | null = null;
     for (let i = Math.max(boundary, 0); i < firstWork; i++) {
       const event = events[i];
+      if (auditBlockField(event.block, "Workflow")?.startsWith("single-stage:")) continue;
       if (
         event.event !== "WORKFLOW_STARTED" &&
         event.event !== "STAGE_JUMPED" &&
-        event.event !== "STAGE_STARTED"
+        (event.event !== "STAGE_STARTED" || unitMajor)
       ) continue;
       const field = auditBlockField(event.block, "Source Baseline");
-      if (field !== null) baselineField = field;
+      if (field !== null) {
+        if (eventIsCrossShardTied(i)) baselineField = UNBINDABLE_FINGERPRINT;
+        else baselineField = field;
+      }
     }
     if (baselineField === UNBINDABLE_FINGERPRINT) sourceBaseline = { state: "unbindable" };
     else if (baselineField !== null) {
@@ -6031,11 +6079,22 @@ function sourcePathIsExcluded(path: string, carriesWorkspaceShell: boolean): boo
   return false;
 }
 
+export interface ReadUnitSourceManifestOptions {
+  /** Bolt worktrees fingerprint exactly one selected repo even if their forked
+   * record still names the parent multi-repo intent. */
+  worktreeRelative?: boolean;
+}
+
+function isBoltWorktreeProjectDir(projectDir: string): boolean {
+  return existsSync(join(projectDir, ".aidlc", "worktree-meta.json"));
+}
+
 /** Strictly read and validate a unit's engine-required source-manifest.json. */
 export function readUnitSourceManifest(
   projectDir: string,
   stageSlug: string,
   unit: string,
+  options: ReadUnitSourceManifestOptions = {},
 ): ReadUnitSourceManifestResult {
   if (!/^[a-z][a-z0-9-]*$/.test(stageSlug)) return { ok: false, reason: `invalid stage slug ${JSON.stringify(stageSlug)}` };
   const unitError = validateUnitName(unit);
@@ -6068,7 +6127,10 @@ export function readUnitSourceManifest(
   if (value.version !== 1) return { ok: false, reason: "version must equal 1" };
   if (!Array.isArray(value.writes)) return { ok: false, reason: "writes must be an array" };
 
-  const recordedRepos = intentRepos(projectDir);
+  const recordedRepos =
+    options.worktreeRelative || isBoltWorktreeProjectDir(projectDir)
+      ? []
+      : intentRepos(projectDir);
   const recordedRepoSet = new Set(recordedRepos);
   const carriesWorkspaceShell = recordedRepos.length === 0;
   const claims = new Set<string>();

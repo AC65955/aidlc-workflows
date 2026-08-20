@@ -137,8 +137,10 @@ prepare`:
    Then include the full approved `code-generation-plan.md` and
    `unit-test-instructions.md`. The worker must produce the unit's
    `construction/<unit>/code-generation/source-manifest.json` in the worktree,
-   listing every application-source path it creates or modifies, before the
-   in-Bolt review. The approved Testing Contract is authoritative:
+   listing every application-source path it creates, modifies, or deletes,
+   before the in-Bolt review. Because a Bolt is the single selected repository,
+   these paths are worktree-relative and omit `repo` even when the parent intent
+   records multiple repositories. The approved Testing Contract is authoritative:
    workers do not re-resolve memory, and retries reuse the same approved bytes.
    The plan-approval guard rejects a delegated worker whose marker is missing,
    stale, or different from the approved plan. Headless worker harnesses that

@@ -94,6 +94,7 @@ import {
   readAuditShardEvents,
   readAllAuditShards,
   readUnitSourceManifest,
+  readUnitSourceSnapshot,
   readStateFile,
   relativeRecordDir,
   reviewArtifactFingerprint,
@@ -104,6 +105,7 @@ import {
   resolveStage,
   terminalReviewVerdict,
   sourceClaimCovers,
+  type SourceClaimModel,
   UNBINDABLE_FINGERPRINT,
   validateUnitName,
   worktreeAuditFilePath,
@@ -483,13 +485,38 @@ function reviewerReceiptError(
   }
 
   // Pre-upgrade worktrees have no attested base commit and retain migration
-  // fail-open behavior. Modern worktrees must prove every application-source
-  // path in their footprint is inside this unit's validated manifest claims.
+  // fail-open behavior. Modern worktrees must validate the exact unit binding
+  // that the reviewer saw before trusting its claims for footprint coverage.
   if (baseCommit !== null) {
-    const manifest = readUnitSourceManifest(wt, stage, unit);
-    if (!manifest.ok) {
-      return { error: `claimed converged but unit "${unit}" has no valid source manifest (${manifest.reason})` };
+    const recordedUnitFp = auditBlockField(latestTerminal, "Unit Source Fingerprint");
+    const bindingBypass = auditBlockField(latestTerminal, "Unit Source Binding Bypass") === "true";
+    if (bindingBypass || recordedUnitFp === null || recordedUnitFp === UNBINDABLE_FINGERPRINT) {
+      return {
+        error:
+          `claimed converged but unit "${unit}" has no verifiable modern Unit Source Fingerprint; ` +
+          `re-run the reviewer in the worktree and record a fresh verdict before finalizing`,
+      };
     }
+    const manifest = readUnitSourceManifest(wt, stage, unit, {
+      worktreeRelative: true,
+    });
+    const snapshot = readUnitSourceSnapshot(wt, stage, unit, recordedUnitFp);
+    if (
+      !manifest.ok ||
+      snapshot === null ||
+      snapshot.manifestSha256 !== manifest.rawBytesSha256
+    ) {
+      return {
+        error:
+          `claimed converged but unit "${unit}"'s reviewed source manifest binding is missing, ` +
+          `corrupt, or no longer matches its review; re-run the reviewer in the worktree and ` +
+          `record a fresh verdict before finalizing`,
+      };
+    }
+    const reviewedClaims: SourceClaimModel = {
+      claims: manifest.claims,
+      prefixes: manifest.prefixes,
+    };
     const idx = join(tmpdir(), `aidlc-swarm-footprint-${process.pid}-${randomUUID().slice(0, 8)}`);
     const env = { ...process.env, GIT_INDEX_FILE: idx };
     const git = (args: string[]) => spawnSync("git", ["-C", wt, ...args], {
@@ -514,7 +541,7 @@ function reviewerReceiptError(
       const outside = diff.stdout
         .split("\0")
         .filter(Boolean)
-        .filter((path) => !sourceClaimCovers(`\0${path}`, manifest));
+        .filter((path) => !sourceClaimCovers(`\0${path}`, reviewedClaims));
       if (outside.length > 0) {
         const rendered = outside.slice(0, 10).join(", ") +
           (outside.length > 10 ? ` … and ${outside.length - 10} more` : "");

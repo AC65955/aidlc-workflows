@@ -1851,11 +1851,61 @@ function verifyReviewerPrecondition(
   const sourceFreshnessOff =
     process.env.AIDLC_SKIP_SOURCE_FRESHNESS === "1";
   const settledSwarm = isSettledSwarmForArtifactGuard(pd, stage, content);
+  // A tightly bounded reconciliation handles the one intentional exception to
+  // the global outer boundary: after an unclaimed addition is reverted, the
+  // current baseline delta can be fully covered by fresh modern unit bindings
+  // even though the newest workspace-global receipt saw the transient file.
+  // Any legacy/missing/stale unit evidence or remaining unclaimed baseline delta
+  // keeps the normal global-first refusal.
+  let baselineChanged: Set<string> | null = null;
+  let baselineUnclaimed: string[] | null = null;
+  if (
+    stage.workspace_requires === true &&
+    receipts.sourceBaseline.state === "ready" &&
+    receipts.currentSourceListing !== null
+  ) {
+    baselineChanged = new Set<string>();
+    const baseline = receipts.sourceBaseline.listing;
+    for (const [pathKey, oid] of baseline) {
+      if (receipts.currentSourceListing.get(pathKey) !== oid) baselineChanged.add(pathKey);
+    }
+    for (const pathKey of receipts.currentSourceListing.keys()) {
+      if (!baseline.has(pathKey)) baselineChanged.add(pathKey);
+    }
+    const claimModels = [...receipts.freshUnitClaims.values()];
+    baselineUnclaimed = [...baselineChanged]
+      .filter((pathKey) => !claimModels.some((claims) => sourceClaimCovers(pathKey, claims)))
+      .sort();
+  }
+  const resolutionForReconciliation = perUnit ? resolveBoltDag(pd) : null;
+  const applicableReconciliationUnits =
+    resolutionForReconciliation?.state === "ok"
+      ? resolutionForReconciliation.units.filter(
+          (unit) =>
+            filterProducesByKind(
+              stage.produces_kinds,
+              stage.produces ?? [],
+              resolutionForReconciliation.unitKinds?.get(unit) ?? null,
+            ).length > 0,
+        )
+      : [];
+  const baselineReversionReconciled =
+    receipts.sourceStale &&
+    perUnit &&
+    applicableReconciliationUnits.length > 0 &&
+    applicableReconciliationUnits.every(
+      (unit) =>
+        receipts.unitVerdicts.has(unit) &&
+        receipts.freshUnitClaims.has(unit) &&
+        !receipts.unitStale.has(unit),
+    ) &&
+    baselineUnclaimed?.length === 0;
   const staleSource =
     stage.workspace_requires === true &&
     !sourceFreshnessOff &&
     !settledSwarm &&
-    receipts.sourceStale;
+    receipts.sourceStale &&
+    !baselineReversionReconciled;
   if (staleSource) {
     staleSourcePreconditionError(
       stage.slug,
@@ -1934,7 +1984,8 @@ function verifyReviewerPrecondition(
           `run \`aidlc-log.ts review --stage ${stage.slug} --unit <unit> --reviewer ` +
           `${reviewer} --iteration <next ordinal>\`, then record the verdict with ` +
           `the same command plus \`--verdict <READY|NOT-READY>\` and stop editing ` +
-          `produces[] artifacts and that unit's claimed source paths.`,
+          `produces[] artifacts, that unit's source-manifest.json, and that unit's ` +
+          `claimed source paths.`,
       );
     }
     if (recoverySpent.length > 0) {
@@ -1987,18 +2038,8 @@ function verifyReviewerPrecondition(
     receipts.sourceBaseline.state === "ready" &&
     receipts.currentSourceListing !== null
   ) {
-    const changed = new Set<string>();
-    const baseline = receipts.sourceBaseline.listing;
-    for (const [pathKey, oid] of baseline) {
-      if (receipts.currentSourceListing.get(pathKey) !== oid) changed.add(pathKey);
-    }
-    for (const pathKey of receipts.currentSourceListing.keys()) {
-      if (!baseline.has(pathKey)) changed.add(pathKey);
-    }
-    const claimModels = [...receipts.freshUnitClaims.values()];
-    const unclaimed = [...changed]
-      .filter((pathKey) => !claimModels.some((claims) => sourceClaimCovers(pathKey, claims)))
-      .sort();
+    const changed = baselineChanged ?? new Set<string>();
+    const unclaimed = baselineUnclaimed ?? [];
     if (unclaimed.length > 0) {
       const rendered = unclaimed.slice(0, 10).map((key) => {
         const separator = key.indexOf("\0");

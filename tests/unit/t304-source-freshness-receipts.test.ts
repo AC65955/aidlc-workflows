@@ -23,14 +23,13 @@
 //      source edit refuses with the source-fingerprint-mismatch message; the
 //      AIDLC_SKIP_SOURCE_FRESHNESS=1 off-switch restores the legacy pass;
 //      receipts without the field (legacy rows) keep passing (fail-open).
-//   4. MULTI-UNIT POLICY (cli) - what the workspace-global hash proves and
-//      what it does not. It proves source-state equality against the NEWEST
-//      recorded review, so the ordinary sequential run, the §12a rework loop
-//      and shared-file integration all pass. It does NOT prove per-unit
-//      attribution: an earlier unit's edit masked by a later unit's review,
-//      and an addition no reviewer was shown, are accepted - the documented
-//      policy #629's acceptance criterion allows. Those rows assert the
-//      limitation deliberately and go red when attribution lands.
+//   4. MULTI-UNIT ATTRIBUTION (cli) - the retained workspace-global newest-
+//      receipt reconciliation is the outer boundary. Modern per-unit receipts
+//      additionally bind manifest bytes and claimed paths; newer fresh claims
+//      shield intentional shared-file integration, while an uncovered edit to
+//      an earlier unit and an addition no manifest claims now fail closed.
+//      Exactly three former documented-limitations tests below pin those new
+//      refusals; ordinary sequential, §12a rework, and shared-file flows pass.
 //
 // Mechanism: MIXED - in-process import for the fingerprint pins, spawns of the
 // real dist tools (log, state) for the stamping + guard rows. The guard rows
@@ -990,25 +989,14 @@ describe("t304 receipt stamping + completion guard (cli)", () => {
   }
 });
 
-// What the workspace-global fingerprint does and does not prove on a
-// for_each: unit-of-work stage, where receipts are per-unit but the engine
-// presents ONE stage-level gate after ALL units are built (#646 review).
-//
-// It proves SOURCE-STATE EQUALITY: the current tree is identical to the one
-// the newest recorded review inspected. It does NOT prove PER-UNIT
-// ATTRIBUTION - one hash cannot say which unit wrote a given file, so source
-// changed before that newest review passes, and a fresh receipt re-validates
-// every earlier one. An earlier revision tried to recover attribution from the
-// diff SHAPE (every consecutive transition a pure addition); it was removed
-// after being reproduced failing in both directions - refusing the §12a rework
-// loop and ordinary shared-file integration, while still admitting an
-// addition nobody reviewed. #629's acceptance criterion allows this via
-// "ambiguous attribution fails closed OR FOLLOWS AN EXPLICITLY DOCUMENTED
-// POLICY"; the policy is stated in the CHANGELOG, docs/reference/
-// 12-state-machine.md and verifyReviewerPrecondition's own comment block, and
-// pinned by the two limitation tests below. When per-unit attribution lands
-// those two turn red on purpose.
-describe("t304 multi-unit flow: what the workspace-global fingerprint does and does not prove", () => {
+// The workspace-global fingerprint remains the outer source-state boundary on
+// this for_each stage, but #662 adds per-unit manifest/snapshot attribution.
+// Modern receipts are checked newest-first: a later fresh claimant can shield
+// an intentional shared-file integration, while an earlier unit's unreviewed
+// edit stays stale. The baseline/claims union also refuses changed paths no
+// reviewed unit claims. The rejected consecutive-diff-shape rule remains gone;
+// attribution comes only from declared claims bound to reviewed content.
+describe("t304 multi-unit flow: global outer binding plus per-unit attribution", () => {
   let proj: string;
 
   beforeEach(() => {
@@ -1342,6 +1330,49 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
     });
     return { rc: r.status ?? -1, out: r.stdout ?? "" };
   }
+
+  test("finalize refuses footprint outside claims, rejects manifest tamper, accepts covering claims, and skips legacy missing-base metadata", () => {
+    const outside = makeFixture();
+    runSwarm(outside, ["prepare", "--batch", "1", "--units", "foot", "--base", "main"]);
+    const outsideWt = wtPath(outside, "foot");
+    writeFileSync(join(outsideWt, "owned.ts"), "export const owned = 1;\n");
+    writeFileSync(join(outsideWt, "extra.ts"), "export const extra = 1;\n");
+    recordReview(outsideWt, "code-generation", REVIEWER, "foot", "READY", [{ path: "owned.ts" }]);
+    const outsideResult = runSwarm(outside, ["finalize", "--batch", "1", "--units", "foot", "--claimed", "foot", "--check-cmd", `"${process.execPath}" -e "process.exit(0)"`]);
+    expect(outsideResult.rc).toBe(2);
+    expect(outsideResult.out).toContain("outside unit");
+
+    const tampered = makeFixture();
+    runSwarm(tampered, ["prepare", "--batch", "1", "--units", "tamper", "--base", "main"]);
+    const tamperWt = wtPath(tampered, "tamper");
+    writeFileSync(join(tamperWt, "owned.ts"), "export const owned = 1;\n");
+    recordReview(tamperWt, "code-generation", REVIEWER, "tamper", "READY", [{ path: "owned.ts" }]);
+    const manifestPath = join(seededRecordDir(tamperWt), "construction", "tamper", "code-generation", "source-manifest.json");
+    writeFileSync(manifestPath, `${JSON.stringify({ stage: "code-generation", unit: "tamper", version: 1, writes: [{ path: "owned.ts" }, { path: "extra.ts" }] })}\n`);
+    const tamperResult = runSwarm(tampered, ["finalize", "--batch", "1", "--units", "tamper", "--claimed", "tamper", "--check-cmd", `"${process.execPath}" -e "process.exit(0)"`]);
+    expect(tamperResult.rc).toBe(2);
+    expect(tamperResult.out).toContain("reviewed source manifest binding");
+
+    const covered = makeFixture();
+    runSwarm(covered, ["prepare", "--batch", "1", "--units", "cover", "--base", "main"]);
+    const coverWt = wtPath(covered, "cover");
+    writeFileSync(join(coverWt, "owned.ts"), "export const owned = 1;\n");
+    writeFileSync(join(coverWt, "extra.ts"), "export const extra = 1;\n");
+    recordReview(coverWt, "code-generation", REVIEWER, "cover", "READY", [{ path: "owned.ts" }, { path: "extra.ts" }]);
+    expect(runSwarm(covered, ["finalize", "--batch", "1", "--units", "cover", "--claimed", "cover", "--check-cmd", `"${process.execPath}" -e "process.exit(0)"`]).rc).toBe(0);
+
+    const legacy = makeFixture();
+    runSwarm(legacy, ["prepare", "--batch", "1", "--units", "legacy", "--base", "main"]);
+    const legacyWt = wtPath(legacy, "legacy");
+    writeFileSync(join(legacyWt, "owned.ts"), "export const owned = 1;\n");
+    recordReview(legacyWt, "code-generation", REVIEWER, "legacy", "READY", [{ path: "different.ts" }]);
+    const shards = readdirSync(seededAuditDir(legacyWt)).filter((name) => name.endsWith(".md"));
+    for (const name of shards) {
+      const path = join(seededAuditDir(legacyWt), name);
+      writeFileSync(path, readFileSync(path, "utf-8").replace(/^\*\*Base commit\*\*: .*\r?\n/gm, ""));
+    }
+    expect(runSwarm(legacy, ["finalize", "--batch", "1", "--units", "legacy", "--claimed", "legacy", "--check-cmd", `"${process.execPath}" -e "process.exit(0)"`]).rc).toBe(0);
+  }, 120000);
 
   test("finalize refuses a claimed unit whose worktree source changed after its terminal review", () => {
     const proj = makeFixture();

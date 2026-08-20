@@ -31,7 +31,7 @@
       "render-surface": 7
     },
     "coveredByClass": {
-      "function": 169,
+      "function": 173,
       "audit": 43,
       "scope": 11,
       "stage": 11,
@@ -1927,10 +1927,6 @@
         {
           "file": "tests/unit/t291-review-receipt-recovery.test.ts",
           "mechanism": "cli"
-        },
-        {
-          "file": "tests/unit/t305-per-unit-attribution-receipts.test.ts",
-          "mechanism": "none"
         }
       ],
       "status": "covered"
@@ -3131,7 +3127,7 @@
       "coveredBy": [
         {
           "file": "tests/unit/t305-per-unit-attribution-receipts.test.ts",
-          "mechanism": "none"
+          "mechanism": "cli"
         }
       ],
       "status": "covered"
@@ -3195,7 +3191,7 @@
       "coveredBy": [
         {
           "file": "tests/unit/t305-per-unit-attribution-receipts.test.ts",
-          "mechanism": "none"
+          "mechanism": "cli"
         }
       ],
       "status": "covered"
@@ -3204,8 +3200,13 @@
       "unitClass": "function",
       "unitId": "function:readUnitSourceSnapshot",
       "minMechanism": "none",
-      "coveredBy": [],
-      "status": "UNCOVERED"
+      "coveredBy": [
+        {
+          "file": "tests/unit/t305-per-unit-attribution-receipts.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
     },
     {
       "unitClass": "function",
@@ -3864,7 +3865,7 @@
       "coveredBy": [
         {
           "file": "tests/unit/t305-per-unit-attribution-receipts.test.ts",
-          "mechanism": "none"
+          "mechanism": "cli"
         }
       ],
       "status": "covered"
@@ -4350,8 +4351,13 @@
       "unitClass": "function",
       "unitId": "function:workspaceSourceListing",
       "minMechanism": "none",
-      "coveredBy": [],
-      "status": "UNCOVERED"
+      "coveredBy": [
+        {
+          "file": "tests/unit/t305-per-unit-attribution-receipts.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
     },
     {
       "unitClass": "function",
@@ -4416,8 +4422,13 @@
       "unitClass": "function",
       "unitId": "function:writeBaselineSourceSnapshot",
       "minMechanism": "none",
-      "coveredBy": [],
-      "status": "UNCOVERED"
+      "coveredBy": [
+        {
+          "file": "tests/unit/t305-per-unit-attribution-receipts.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
     },
     {
       "unitClass": "function",
@@ -4480,8 +4491,13 @@
       "unitClass": "function",
       "unitId": "function:writeUnitSourceSnapshot",
       "minMechanism": "none",
-      "coveredBy": [],
-      "status": "UNCOVERED"
+      "coveredBy": [
+        {
+          "file": "tests/unit/t305-per-unit-attribution-receipts.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
     },
     {
       "unitClass": "hook",

@@ -71,7 +71,7 @@ MANDATORY: Follow stage-protocol.md for approval gates, question format, and com
 - Application code goes to workspace root, NEVER to the record dir
 - Brownfield: modify files in-place. NEVER create duplicates like ClassName_modified.java
 - Add data-testid attributes to interactive UI elements for test automation
-- Before review, write `source-manifest.json` listing every application-source path this unit created or modified, including shell-, scaffolding-, and generator-written files
+- Before review, write `source-manifest.json` listing every application-source path this unit created, modified, or deleted, including shell-, scaffolding-, and generator-written files
 
 ### Step 1: Read All Unit Artifacts
 
@@ -267,11 +267,13 @@ with this strict schema:
 }
 ```
 
-List every application-source path this unit created or modified, including
-files written by shell commands, scaffolding, or generators. Use a trailing
-`/` directory claim for generated trees. Multi-repo entries name their
-recorded `repo`. The engine refuses to record the unit review without this
-manifest, and unclaimed changed paths block stage completion.
+List every application-source path this unit created, modified, or deleted,
+including files written by shell commands, scaffolding, or generators. Use a
+trailing `/` directory claim for generated trees. In the main workspace,
+multi-repo entries name their recorded `repo`; inside a Bolt worktree paths are
+relative to its single selected repo and MUST omit `repo`. The engine refuses
+to record the unit review without this manifest, and unclaimed changed paths
+block stage completion.
 
 Create
 `<record>/construction/{unit-name}/code-generation/traceability.json`.
