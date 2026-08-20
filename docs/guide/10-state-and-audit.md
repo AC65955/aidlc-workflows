@@ -167,11 +167,17 @@ of fresh claims with the stage-entry source baseline. An uncovered change or a
 stale unit blocks all four completion routes and offers that unit's one bounded
 stale-receipt recovery.
 
-The workspace-global `Source Fingerprint` remains an outer post-review mutation
-boundary. Pre-upgrade fieldless receipts/baselines retain documented migration
-fail-open behavior; missing or corrupt modern evidence fails closed.
-`AIDLC_SKIP_SOURCE_FRESHNESS=1` is the deterministic emergency off-switch and
-must be present again when consuming a bypass-marked receipt.
+The workspace-global `Source Fingerprint` is normally the outer post-review
+mutation boundary. One narrow reconciliation makes the documented “revert”
+recovery real: after an unclaimed addition is removed, completion can continue
+only when the stage baseline is present and valid, every applicable unit still
+has a fresh modern binding, and the baseline-to-current delta has zero
+unclaimed paths. Ordinary post-review edits, stale or legacy unit evidence, and
+any remaining unclaimed path still refuse. Pre-upgrade fieldless receipts or
+baselines retain documented migration fail-open behavior; missing or corrupt
+modern evidence fails closed. `AIDLC_SKIP_SOURCE_FRESHNESS=1` is the
+deterministic emergency off-switch and must be present again when consuming a
+bypass-marked receipt.
 
 ---
 

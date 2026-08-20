@@ -177,7 +177,7 @@ for recovering a legitimately-run stage whose contribution files were lost.
 
 **Source freshness and per-unit attribution (#629/#646/#662).** On a
 `workspace_requires` stage, every terminal review still carries the workspace-
-global `Source Fingerprint`; the newest modern binding remains the outer
+global `Source Fingerprint`; the newest modern binding is normally the outer
 post-review-mutation boundary on all four completion routes. Per-unit receipts
 add `Unit Source Fingerprint`, which binds the raw bytes of the unit's strict
 `source-manifest.json` and the current content of every exact/directory claim.
@@ -194,6 +194,15 @@ fresh claims union. Unit-major Construction always uses the workflow/jump
 boundary because source work can precede its late `STAGE_STARTED`. Equal-second
 cross-shard rows that would decide a boundary or newest claimant fail closed
 instead of trusting shard filename order.
+
+There is one narrowly bounded reconciliation of the global boundary: if an
+unclaimed addition seen by the newest review is later reverted, completion may
+proceed only when the effective baseline snapshot is present and valid, every
+applicable unit still has a fresh modern unit binding, and the baseline-to-
+current delta contains zero unclaimed paths. This proves that the transient
+unclaimed addition is gone. Any ordinary post-review edit, stale or legacy unit
+binding, missing evidence, or remaining unclaimed delta still takes the normal
+global-first refusal path.
 
 Migration is deliberate: a pre-upgrade workflow with no baseline skips the
 unclaimed check, and a fieldless per-unit receipt retains the #629 global
@@ -341,7 +350,7 @@ Session hooks check for the active intent's `aidlc-state.md` (under `aidlc/space
 
 | Event | Emitter | Notes |
 |---|---|---|
-| `BOLT_STARTED` | `tools/aidlc-bolt.ts` | Accepts CSV bolt names for parallel batches |
+| `BOLT_STARTED` | `tools/aidlc-bolt.ts` | Accepts CSV bolt names for parallel batches; a modern `--worktree` row propagates the immutable Base commit and content-addressed raw-aware Base Source Listing attested at worktree creation |
 | `BOLT_COMPLETED` | `tools/aidlc-bolt.ts` | Paired with a prior `BOLT_STARTED` |
 | `BOLT_FAILED` | `tools/aidlc-bolt.ts` (`fail` + `abort`) | `--succeeded-siblings` captures parallel-batch survivors; `abort` adds `Reason: aborted` field for sub-classification |
 | `AUTONOMY_MODE_SET` | `tools/aidlc-bolt.ts` | Atomically updates `Construction Autonomy Mode` field; validates field exists first (audit-first) |
@@ -413,7 +422,7 @@ Pre-registered for v0.4.0; the three `WORKTREE_*` rows ship with `aidlc-worktree
 
 | Event | Emitter | Trigger |
 |---|---|---|
-| `WORKTREE_CREATED` | `tools/aidlc-worktree.ts` | Per-Bolt git worktree created from main on Bolt start (subcommand: `create`) |
+| `WORKTREE_CREATED` | `tools/aidlc-worktree.ts` | Audit-first per-Bolt creation records the immutable Base commit and `Base Source Listing` hash over the raw-aware source listing computed before `git worktree add` (subcommand: `create`) |
 | `WORKTREE_MERGED` | `tools/aidlc-worktree.ts` | Bolt's worktree merged back to main on gate approval (subcommand: `merge`) |
 | `WORKTREE_DISCARDED` | `tools/aidlc-worktree.ts` | Aborted Bolt's worktree explicitly removed (subcommand: `discard`) |
 | `STATE_FORKED` | `tools/aidlc-state.ts` | State file forked to worktree on Bolt start (subcommand: `fork`) |
@@ -471,7 +480,7 @@ Pre-registered for v0.6.0 in milestone 2. All six swarm events now emit from the
 | Event | Emitter | Trigger |
 |---|---|---|
 | `SWARM_STARTED` | `tools/aidlc-swarm.ts` | Swarm referee `prepare` captured the exact attempt and forked a batch of dependency-linked Units |
-| `SWARM_UNIT_CONVERGED` | `tools/aidlc-swarm.ts` | A swarm Unit re-verified green and untampered, with its configured post-Bolt reviewer receipt and Unit Source Fingerprint current, and its attested base-to-worktree footprint contained by reviewed manifest claims. It then merges AIDLC metadata back and records the validated `Source Fingerprint` plus immutable `Source Commit`; bypass rows remain explicit and require the switch again at source merge. |
+| `SWARM_UNIT_CONVERGED` | `tools/aidlc-swarm.ts` | A swarm Unit re-verified green and untampered and merged its AIDLC metadata back. Unless the row explicitly carries `Source Freshness Bypass: true`, finalize also verified the configured post-Bolt reviewer receipt, current `Source Fingerprint` and `Unit Source Fingerprint`, and the attested raw-aware base-to-worktree footprint against reviewed manifest claims before recording the immutable `Source Commit`. A bypass row omits those freshness guarantees and requires `AIDLC_SKIP_SOURCE_FRESHNESS=1` again at source merge. |
 | `SWARM_UNIT_FAILED` | `tools/aidlc-swarm.ts` | A swarm Unit failed the `finalize` re-verify (not claimed, claimed-but-red, tampered, or missing its configured reviewer receipt) |
 | `SWARM_BATON_RETURNED` | `tools/aidlc-swarm.ts` | A swarm Unit returned the baton to the conductor for orchestrator-mediated coordination |
 | `SWARM_COMPLETED` | `tools/aidlc-swarm.ts` | All Units in the batch finished (converged or failed); batch closed |
