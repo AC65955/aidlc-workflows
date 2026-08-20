@@ -20,9 +20,9 @@
     "render-surface": "tui"
   },
   "counts": {
-    "total": 615,
+    "total": 616,
     "enumeratedByClass": {
-      "function": 355,
+      "function": 356,
       "audit": 85,
       "scope": 11,
       "stage": 33,
@@ -1941,6 +1941,13 @@
     {
       "unitClass": "function",
       "unitId": "function:getField",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:gitCommitSourceListing",
       "minMechanism": "none",
       "coveredBy": [],
       "status": "UNCOVERED"

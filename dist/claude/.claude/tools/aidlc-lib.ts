@@ -5816,6 +5816,88 @@ export function filteredRawIndexEntries(
   return cleanFilteredRawLines(repoDir, env, paths)?.entries ?? null;
 }
 
+/**
+ * Reconstruct the exact checked-out source listing for an immutable commit
+ * without registering a Git worktree or touching the caller's index/worktree.
+ * A temporary index is seeded from the commit and checkout-index populates an
+ * ordinary directory, so clean/process/ident raw-byte folding sees the same
+ * files and repository-local configuration as a real worktree checkout.
+ */
+export function gitCommitSourceListing(
+  repoDir: string,
+  commit: string,
+): WorkspaceSourceListing | null {
+  if (!isGitRepoDir(repoDir) || !/^[0-9a-f]{40,64}$/.test(commit)) return null;
+  const root = join(tmpdir(), `aidlc-commit-listing-${process.pid}-${randomUUID().slice(0, 8)}`);
+  const indexFile = join(root, "index");
+  const checkoutDir = join(root, "checkout");
+  const env = { ...process.env, GIT_INDEX_FILE: indexFile };
+  try {
+    mkdirSync(checkoutDir, { recursive: true });
+    const readTree = spawnSync("git", ["-C", repoDir, "read-tree", commit], {
+      env,
+      encoding: "utf-8",
+      maxBuffer: 512 * 1024 * 1024,
+    });
+    if (readTree.status !== 0) return null;
+    const checkout = spawnSync(
+      "git",
+      ["-C", repoDir, "checkout-index", "-a", "-f", `--prefix=${checkoutDir}${sep}`],
+      { env, encoding: "utf-8", maxBuffer: 512 * 1024 * 1024 },
+    );
+    if (checkout.status !== 0) return null;
+
+    const shellPatterns = [
+      ...AIDLC_SHELL_DIR_NAMES,
+      ...AIDLC_SENSOR_CACHE_GLOBS,
+    ];
+    spawnSync(
+      "git",
+      ["-C", repoDir, "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ...shellPatterns],
+      { env, encoding: "utf-8", maxBuffer: 512 * 1024 * 1024 },
+    );
+
+    const listed = spawnSync("git", ["-C", repoDir, "ls-files", "-s", "-z"], {
+      env,
+      encoding: "utf-8",
+      maxBuffer: 512 * 1024 * 1024,
+    });
+    if (listed.status !== 0) return null;
+    const listing: WorkspaceSourceListing = new Map();
+    const regularPaths: string[] = [];
+    for (const record of listed.stdout.split("\0")) {
+      if (!record) continue;
+      const tab = record.indexOf("\t");
+      if (tab === -1) return null;
+      const match = /^(\d{6}) ([0-9a-f]{40,64}) \d+$/.exec(record.slice(0, tab));
+      const path = record.slice(tab + 1);
+      if (match === null || !path) return null;
+      listing.set(`\0${path}`, match[2]);
+      if (match[1] === "100644" || match[1] === "100755") regularPaths.push(path);
+    }
+
+    // Query attributes/config through the owning repository while pointing Git
+    // at the ordinary reconstructed checkout. The worktree bytes hashed here
+    // therefore match a real checkout without registering one.
+    const gitDir = spawnSync("git", ["-C", repoDir, "rev-parse", "--absolute-git-dir"], {
+      encoding: "utf-8",
+      maxBuffer: 512 * 1024 * 1024,
+    });
+    if (gitDir.status !== 0 || !gitDir.stdout.trim()) return null;
+    const checkoutEnv = {
+      ...env,
+      GIT_DIR: gitDir.stdout.trim(),
+      GIT_WORK_TREE: checkoutDir,
+    };
+    const raw = cleanFilteredRawLines(checkoutDir, checkoutEnv, regularPaths);
+    if (raw === null) return null;
+    for (const entry of raw.entries) listing.set(`\0${entry.path}`, entry.sha);
+    return listing;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 export type WorkspaceSourceListing = Map<string, string>;
 
 export interface WorkspaceSourceState {

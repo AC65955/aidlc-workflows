@@ -671,7 +671,9 @@ function reviewAttemptSummary(
     }
     if (auditBlockField(entry.block, "Stage") !== stage.slug) continue;
     if (entry.event === "GATE_REJECTED") {
-      if (tiedAcrossShards(i)) ambiguity = `cross-shard gate boundary tie at ${entry.timestamp}`;
+      const tied = tiedAcrossShards(i);
+      if (tied) ambiguity = `cross-shard gate boundary tie at ${entry.timestamp}`;
+      else ambiguity = null;
       floor = i;
       boltStarted = false;
       boltBatch = null;
@@ -681,7 +683,9 @@ function reviewAttemptSummary(
       !unitMajor &&
       !auditBlockField(entry.block, "Workflow")?.startsWith("single-stage:")
     ) {
-      if (tiedAcrossShards(i)) ambiguity = `cross-shard stage boundary tie at ${entry.timestamp}`;
+      const tied = tiedAcrossShards(i);
+      if (tied) ambiguity = `cross-shard stage boundary tie at ${entry.timestamp}`;
+      else ambiguity = null;
       floor = i;
       boltStarted = false;
       boltBatch = null;
@@ -860,7 +864,7 @@ function handleReview(args: string[]): void {
           row.event === "BOLT_STARTED" &&
           auditBlockField(row.block, "Bolt slug") === flags.unit,
       );
-    if (flags.unit && !autonomousCandidate && !hasBoltBoundary) {
+    if (flags.unit) {
       const dag = resolveBoltDag(pd);
       if (dag.state !== "ok" || !dag.units.includes(flags.unit)) {
         refuseReview(

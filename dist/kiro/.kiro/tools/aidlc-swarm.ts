@@ -84,6 +84,7 @@ import {
   auditBlockField,
   auditShardDir,
   boltSlugForUnit,
+  filterProducesByKind,
   filteredRawIndexEntries,
   findAllEvents,
   getField,
@@ -93,7 +94,6 @@ import {
   parseArgs,
   parseSourceListing,
   readAuditShardEvents,
-  readAllAuditShards,
   readUnitSourceManifest,
   readUnitSourceSnapshot,
   readStateFile,
@@ -345,32 +345,45 @@ function reviewerReceiptError(
 ): ReceiptCheck {
   const boltSlug = swarmBoltSlug(unit);
   const wt = worktreePath(projectDir, boltSlug);
-  const audit = readAllAuditShards(wt);
-  if (!audit) {
-    return {
-      error: `claimed converged but worktree audit is missing; expected a terminal review by ${reviewer}`,
-    };
-  }
+  const creationRows = readAuditShardEvents(projectDir)
+    .filter(
+      (row) =>
+        row.event === "WORKTREE_CREATED" &&
+        auditBlockField(row.block, "Bolt slug") === boltSlug,
+    )
+    .sort((a, b) => {
+      if (a.timestamp !== b.timestamp) return a.timestamp < b.timestamp ? -1 : 1;
+      if (a.shard === b.shard) return a.pos - b.pos;
+      return a.shard < b.shard ? -1 : 1;
+    });
+  const creationBlock = creationRows.at(-1)?.block ?? null;
+  const creationBaseCommit = creationBlock === null
+    ? null
+    : auditBlockField(creationBlock, "Base commit");
+  const creationBaseListing = creationBlock === null
+    ? null
+    : auditBlockField(creationBlock, "Base Source Listing");
+  const creationModern = creationBaseCommit !== null || creationBaseListing !== null;
 
   const relevant = new Set([
     "BOLT_STARTED",
     "REVIEW_REQUESTED",
     "REVIEW_COMPLETED",
   ]);
-  const events = audit
-    .replace(/\r\n/g, "\n")
-    .split(/\n---\n/)
-    .map((block, position) => ({
-      block,
-      position,
-      event: auditBlockField(block, "Event") ?? "",
-      timestamp: auditBlockField(block, "Timestamp") ?? "",
-    }))
+  const events = readAuditShardEvents(wt)
     .filter((event) => relevant.has(event.event))
     .sort((a, b) => {
       if (a.timestamp !== b.timestamp) return a.timestamp < b.timestamp ? -1 : 1;
-      return a.position - b.position;
+      if (a.shard === b.shard) return a.pos - b.pos;
+      return a.shard < b.shard ? -1 : 1;
     });
+  const crossShardTied = (index: number): boolean =>
+    events.some(
+      (candidate, other) =>
+        other !== index &&
+        candidate.timestamp === events[index].timestamp &&
+        candidate.shard !== events[index].shard,
+    );
 
   let boltStart = -1;
   for (let i = 0; i < events.length; i++) {
@@ -378,7 +391,14 @@ function reviewerReceiptError(
       events[i].event === "BOLT_STARTED" &&
       auditBlockField(events[i].block, "Bolt slug") === boltSlug
     ) {
-      boltStart = i;
+      if (crossShardTied(i)) {
+        let end = i;
+        while (end + 1 < events.length && events[end + 1].timestamp === events[i].timestamp) end++;
+        boltStart = end;
+        i = end;
+      } else {
+        boltStart = i;
+      }
     }
   }
   if (boltStart === -1) {
@@ -390,6 +410,14 @@ function reviewerReceiptError(
   const boltStartBlock = events[boltStart].block;
   const baseCommit = auditBlockField(boltStartBlock, "Base commit");
   const baseSourceListing = auditBlockField(boltStartBlock, "Base Source Listing");
+  if (
+    creationModern &&
+    (baseCommit !== creationBaseCommit || baseSourceListing !== creationBaseListing)
+  ) {
+    return {
+      error: `claimed converged but modern WORKTREE_CREATED attestation was not propagated to BOLT_STARTED for unit "${unit}"`,
+    };
+  }
   let verifiedBaseListing: Map<string, string> | null = null;
   if (baseCommit !== null) {
     const metaPath = join(wt, ".aidlc", "worktree-meta.json");
@@ -423,7 +451,10 @@ function reviewerReceiptError(
     }
   }
 
-  const pendingRequests = new Map<string, boolean>();
+  const pendingRequests = new Map<
+    string,
+    { recovery: boolean; timestamp: string; shard: string }
+  >();
   let latestTerminal: string | null = null;
   for (let i = boltStart + 1; i < events.length; i++) {
     const event = events[i];
@@ -441,14 +472,25 @@ function reviewerReceiptError(
     if (!iteration || !/^[1-9][0-9]*$/.test(iteration)) continue;
     const requestKey = `${unit}\u0000${iteration}`;
     if (event.event === "REVIEW_REQUESTED") {
-      pendingRequests.set(
-        requestKey,
-        auditBlockField(event.block, "Recovery") === "stale-receipt",
-      );
+      if (crossShardTied(i)) continue;
+      pendingRequests.set(requestKey, {
+        recovery: auditBlockField(event.block, "Recovery") === "stale-receipt",
+        timestamp: event.timestamp,
+        shard: event.shard,
+      });
       continue;
     }
-    const recovery = pendingRequests.get(requestKey);
-    if (recovery === undefined || !pendingRequests.delete(requestKey)) continue;
+    if (crossShardTied(i)) {
+      pendingRequests.delete(requestKey);
+      continue;
+    }
+    const request = pendingRequests.get(requestKey);
+    if (
+      request === undefined ||
+      (request.timestamp === event.timestamp && request.shard !== event.shard) ||
+      !pendingRequests.delete(requestKey)
+    ) continue;
+    const recovery = request.recovery;
     const rawVerdict = auditBlockField(event.block, "Verdict");
     const verdict = recovery
       ? rawVerdict === "READY" || rawVerdict === "NOT-READY"
@@ -868,11 +910,26 @@ function handlePrepare(rest: string[]): void {
         `(${dag.detail}). Fix unit-of-work-dependency.md before starting the swarm.`,
     );
   }
-  const slugUniverse =
-    dag.state === "ok"
-      ? [...new Set([...dag.units, ...units])]
-      : units;
-  assertUniqueSwarmBoltSlugs(slugUniverse);
+  const stageDefinition = resolveStage(stage);
+  if (dag.state !== "ok") {
+    fail("prepare requires a current resolved Unit DAG");
+  }
+  for (const unit of units) {
+    if (!dag.units.includes(unit)) {
+      fail(`prepare unit "${unit}" is not in the current resolved Unit DAG`);
+    }
+    if (
+      stageDefinition &&
+      filterProducesByKind(
+        stageDefinition.produces_kinds,
+        stageDefinition.produces ?? [],
+        dag.unitKinds?.get(unit) ?? null,
+      ).length === 0
+    ) {
+      fail(`prepare unit "${unit}" has no applicable required outputs for stage "${stage}"`);
+    }
+  }
+  assertUniqueSwarmBoltSlugs(dag.units);
 
   // P7: the construction repo this batch targets. resolveConstructionRepo errors
   // on a multi-repo intent with no --repo (forwarded as the batch failure), infers
@@ -1048,7 +1105,29 @@ function handleFinalize(rest: string[]): void {
   // The universe of units in the batch; defaults to the claimed set when the
   // conductor passes only --claimed (then declined-unit accounting is a no-op).
   const allUnits = flags.units ? splitCsv(flags.units) : claimed.slice();
-  for (const unit of new Set([...allUnits, ...claimed])) swarmBoltSlug(unit);
+  const dag = resolveBoltDag(projectDir);
+  if (dag.state !== "ok") fail("finalize requires a current resolved Unit DAG");
+  const currentStage = (getField(readStateFile(projectDir), "Current Stage") ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+  const stageDefinition = resolveStage(currentStage);
+  for (const unit of new Set([...allUnits, ...claimed])) {
+    swarmBoltSlug(unit);
+    if (!dag.units.includes(unit)) {
+      fail(`finalize unit "${unit}" is not in the current resolved Unit DAG`);
+    }
+    if (
+      stageDefinition &&
+      filterProducesByKind(
+        stageDefinition.produces_kinds,
+        stageDefinition.produces ?? [],
+        dag.unitKinds?.get(unit) ?? null,
+      ).length === 0
+    ) {
+      fail(`finalize unit "${unit}" has no applicable required outputs for stage "${currentStage}"`);
+    }
+  }
   const claimedSet = new Set(claimed);
   const testFile = flags["test-file"];
   const checkCmd = flags["check-cmd"];

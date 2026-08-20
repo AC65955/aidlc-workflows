@@ -26,7 +26,7 @@
 
 import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AIDLC_SRC, cleanupTestProject, createTestProject } from "../harness/fixtures.ts";
 
@@ -34,6 +34,7 @@ const BUN = process.execPath;
 const UTIL = join(AIDLC_SRC, "tools", "aidlc-utility.ts");
 const WT_TOOL = join(AIDLC_SRC, "tools", "aidlc-worktree.ts");
 const SWARM_TOOL = join(AIDLC_SRC, "tools", "aidlc-swarm.ts");
+const LOG_TOOL = join(AIDLC_SRC, "tools", "aidlc-log.ts");
 
 const tempDirs: string[] = [];
 afterAll(() => {
@@ -90,13 +91,69 @@ function makeSiblingRepo(proj: string, name: string): string {
   return dir;
 }
 
-/** True iff branch `bolt-<slug>` exists in the repo at `<proj>/<name>`. */
-function hasBoltBranch(proj: string, repoName: string, slug: string): boolean {
-  return git(join(proj, repoName), "rev-parse", "--verify", `refs/heads/bolt-${slug}`).status === 0;
+function activeRecord(proj: string): string {
+  const intents = join(proj, "aidlc", "spaces", "default", "intents");
+  const pointer = join(intents, "active-intent");
+  if (existsSync(pointer)) return join(intents, readFileSync(pointer, "utf-8").trim());
+  const candidates = readdirSync(intents).filter((name) => existsSync(join(intents, name, "aidlc-state.md")));
+  if (candidates.length !== 1) throw new Error(`cannot resolve active record in ${intents}`);
+  return join(intents, candidates[0]);
+}
+
+function seedOneUnitDag(proj: string, unit: string): void {
+  const record = activeRecord(proj);
+  const dag = join(record, "inception", "units-generation");
+  mkdirSync(dag, { recursive: true });
+  writeFileSync(
+    join(dag, "unit-of-work-dependency.md"),
+    `\`\`\`yaml\nunits:\n  - name: ${unit}\n    depends_on: []\n\`\`\`\n`,
+  );
+  writeFileSync(
+    join(record, "runtime-graph.json"),
+    `${JSON.stringify({ bolt_dag: { units: [{ name: unit, depends_on: [] }], batches: [[unit]] } })}\n`,
+  );
+  const state = join(record, "aidlc-state.md");
+  writeFileSync(
+    state,
+    readFileSync(state, "utf-8")
+      .replace(/^- \*\*Current Stage\*\*:.*$/m, "- **Current Stage**: code-generation")
+      .replace(/^- \*\*Construction Autonomy Mode\*\*:.*$/m, "- **Construction Autonomy Mode**: autonomous"),
+  );
+}
+
+function recordWorktreeReview(proj: string, unit: string, sourcePath: string): RunResult {
+  const wt = worktreeDir(proj, unit);
+  const record = activeRecord(wt);
+  const dir = join(record, "construction", unit, "code-generation");
+  mkdirSync(dir, { recursive: true });
+  for (const name of ["code-generation-plan.md", "unit-test-instructions.md", "code-summary.md"]) {
+    writeFileSync(join(dir, name), `# ${name}\n`);
+  }
+  writeFileSync(join(dir, "traceability.json"), "{}\n");
+  writeFileSync(
+    join(dir, "source-manifest.json"),
+    `${JSON.stringify({ stage: "code-generation", unit, version: 1, writes: [{ path: sourcePath }] }, null, 2)}\n`,
+  );
+  const args = [
+    "review", "--stage", "code-generation", "--reviewer",
+    "aidlc-architecture-reviewer-agent", "--unit", unit, "--iteration", "1",
+    "--project-dir", wt,
+  ];
+  const requested = spawnSync(BUN, [LOG_TOOL, ...args], { encoding: "utf-8", cwd: wt });
+  if ((requested.status ?? -1) !== 0) {
+    return { status: requested.status ?? -1, out: `${requested.stdout ?? ""}${requested.stderr ?? ""}`, stdout: requested.stdout ?? "" };
+  }
+  const completed = spawnSync(BUN, [LOG_TOOL, ...args, "--verdict", "READY"], { encoding: "utf-8", cwd: wt });
+  return { status: completed.status ?? -1, out: `${completed.stdout ?? ""}${completed.stderr ?? ""}`, stdout: completed.stdout ?? "" };
 }
 
 const worktreeDir = (proj: string, slug: string): string =>
   join(proj, ".aidlc", "worktrees", `bolt-${slug}`);
+
+/** True iff branch `bolt-<slug>` exists in the repo at `<proj>/<name>`. */
+function hasBoltBranch(proj: string, repoName: string, slug: string): boolean {
+  return git(join(proj, repoName), "rev-parse", "--verify", `refs/heads/bolt-${slug}`).status === 0;
+}
 
 describe("t166 P7 multi-repo construction — --repo anchors the worktree to the sibling repo", () => {
   // ===========================================================================
@@ -244,18 +301,34 @@ describe("t166 P7 multi-repo construction — --repo anchors the worktree to the
     makeSiblingRepo(proj, "repo-a");
     makeSiblingRepo(proj, "repo-b");
     runUtil(proj, "intent-create", "--scope", "feature", "--repos", "repo-a,repo-b");
+    seedOneUnitDag(proj, "swarmunit");
     const prepared = runSwarm(
       proj, "prepare", "--batch", "1", "--units", "swarmunit", "--base", "main", "--repo", "repo-a",
     );
+    const wt = worktreeDir(proj, "swarmunit");
+    writeFileSync(join(wt, "swarm.ts"), "export const swarm = true;\n");
+    const reviewed = prepared.status === 0
+      ? recordWorktreeReview(proj, "swarmunit", "swarm.ts")
+      : { status: -1, out: prepared.out, stdout: "" };
+    const finalized = reviewed.status === 0
+      ? runSwarm(
+          proj, "finalize", "--batch", "1", "--units", "swarmunit", "--claimed", "swarmunit",
+          "--check-cmd", `"${process.execPath}" -e "require('fs').accessSync('swarm.ts')"`,
+        )
+      : { status: -1, out: reviewed.out, stdout: "" };
+    const merged = finalized.status === 0
+      ? runWorktree(proj, "merge", "--slug", "swarmunit", "--target", "main", "--strategy", "squash", "--repo", "repo-a")
+      : { status: -1, out: finalized.out, stdout: "" };
 
-    test("prepare --repo repo-a exits 0 and forks the worktree", () => {
+    test("prepare --repo repo-a exits 0", () => {
       expect(prepared.status).toBe(0);
-      expect(existsSync(worktreeDir(proj, "swarmunit"))).toBe(true);
     });
-    test("the bolt branch lives in repo-a's ref namespace, NOT repo-b's", () => {
-      // Only true if prepare resolved --repo and threaded it into create's cwd.
-      expect(hasBoltBranch(proj, "repo-a", "swarmunit")).toBe(true);
-      expect(hasBoltBranch(proj, "repo-b", "swarmunit")).toBe(false);
+    test("worktree-relative manifest review, finalize, and source merge land only in repo-a", () => {
+      expect(reviewed.status).toBe(0);
+      expect(finalized.status).toBe(0);
+      expect(merged.status).toBe(0);
+      expect(existsSync(join(proj, "repo-a", "swarm.ts"))).toBe(true);
+      expect(existsSync(join(proj, "repo-b", "swarm.ts"))).toBe(false);
     });
   });
 
@@ -264,6 +337,7 @@ describe("t166 P7 multi-repo construction — --repo anchors the worktree to the
     makeSiblingRepo(proj, "repo-a");
     makeSiblingRepo(proj, "repo-b");
     runUtil(proj, "intent-create", "--scope", "feature", "--repos", "repo-a,repo-b");
+    seedOneUnitDag(proj, "orphanunit");
     const prepared = runSwarm(proj, "prepare", "--batch", "1", "--units", "orphanunit", "--base", "main");
 
     test("exits non-zero with a 'spans 2 repos' message", () => {

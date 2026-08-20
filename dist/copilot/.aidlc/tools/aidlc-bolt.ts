@@ -49,6 +49,8 @@ import {
   holdsAuditLock,
   humanActedSinceGate,
   humanPresenceGuardDisabled,
+  readAuditShardEvents,
+  auditBlockField,
   relativeRecordDir,
   readStateFile,
   resolveProjectDir,
@@ -178,12 +180,44 @@ function parseFlags(args: string[]): Record<string, string> {
   return flags;
 }
 
+function latestWorktreeCreationFields(
+  projectDir: string,
+  slug: string,
+): { modern: boolean; baseCommit: string | null; baseSourceListing: string | null } | null {
+  const rows = readAuditShardEvents(projectDir)
+    .filter(
+      (row) =>
+        row.event === "WORKTREE_CREATED" &&
+        auditBlockField(row.block, "Bolt slug") === slug,
+    )
+    .sort((a, b) => {
+      if (a.timestamp !== b.timestamp) return a.timestamp < b.timestamp ? -1 : 1;
+      if (a.shard === b.shard) return a.pos - b.pos;
+      return a.shard < b.shard ? -1 : 1;
+    });
+  if (rows.length === 0) return null;
+  const latest = rows[rows.length - 1].block;
+  const baseCommit = auditBlockField(latest, "Base commit");
+  const baseSourceListing = auditBlockField(latest, "Base Source Listing");
+  return {
+    modern: baseCommit !== null || baseSourceListing !== null,
+    baseCommit,
+    baseSourceListing,
+  };
+}
+
 function worktreeBaseFields(
   projectDir: string,
   slug: string,
 ): { baseCommit: string; baseSourceListing: string } | null {
+  const creation = latestWorktreeCreationFields(projectDir, slug);
   const metaPath = join(worktreePath(projectDir, slug), ".aidlc", "worktree-meta.json");
-  if (!existsSync(metaPath)) return null; // pre-#662 worktree migration
+  if (!existsSync(metaPath)) {
+    if (creation?.modern) {
+      throw new Error(`modern WORKTREE_CREATED for "${slug}" requires worktree metadata at ${metaPath}`);
+    }
+    return null;
+  }
 
   let value: unknown;
   try {
@@ -222,6 +256,16 @@ function worktreeBaseFields(
   ) {
     throw new Error(`invalid worktree metadata at ${metaPath}: baseSourceListing must be a sha256 fingerprint`);
   }
+  if (
+    creation?.modern &&
+    (creation.baseCommit !== meta.baseCommit ||
+      creation.baseSourceListing !== meta.baseSourceListing)
+  ) {
+    throw new Error(
+      `worktree metadata at ${metaPath} does not match the authoritative WORKTREE_CREATED attestation`,
+    );
+  }
+  if (creation !== null && !creation.modern) return null;
   return {
     baseCommit: meta.baseCommit,
     baseSourceListing: meta.baseSourceListing,

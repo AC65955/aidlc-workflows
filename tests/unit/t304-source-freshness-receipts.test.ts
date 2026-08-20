@@ -1327,6 +1327,19 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
     return join(proj, ".aidlc", "worktrees", `bolt-${unit}`);
   }
 
+  function ensureDagUnit(proj: string, unit: string): void {
+    const dir = join(seededRecordDir(proj), "inception", "units-generation");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "unit-of-work-dependency.md"),
+      `\`\`\`yaml\nunits:\n  - name: ${unit}\n    depends_on: []\n\`\`\`\n`,
+    );
+    writeFileSync(
+      join(seededRecordDir(proj), "runtime-graph.json"),
+      `${JSON.stringify({ bolt_dag: { units: [{ name: unit, depends_on: [] }], batches: [[unit]] } })}\n`,
+    );
+  }
+
   function runSwarm(
     proj: string,
     args: string[],
@@ -1342,6 +1355,7 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
 
   test("finalize refuses footprint outside claims, rejects manifest tamper, accepts covering claims, and skips legacy missing-base metadata", () => {
     const outside = makeFixture();
+    ensureDagUnit(outside, "foot");
     runSwarm(outside, ["prepare", "--batch", "1", "--units", "foot", "--base", "main"]);
     const outsideWt = wtPath(outside, "foot");
     writeFileSync(join(outsideWt, "owned.ts"), "export const owned = 1;\n");
@@ -1352,6 +1366,7 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
     expect(outsideResult.out).toContain("outside unit");
 
     const tampered = makeFixture();
+    ensureDagUnit(tampered, "tamper");
     runSwarm(tampered, ["prepare", "--batch", "1", "--units", "tamper", "--base", "main"]);
     const tamperWt = wtPath(tampered, "tamper");
     writeFileSync(join(tamperWt, "owned.ts"), "export const owned = 1;\n");
@@ -1363,6 +1378,7 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
     expect(tamperResult.out).toContain("reviewed source manifest binding");
 
     const covered = makeFixture();
+    ensureDagUnit(covered, "cover");
     runSwarm(covered, ["prepare", "--batch", "1", "--units", "cover", "--base", "main"]);
     const coverWt = wtPath(covered, "cover");
     writeFileSync(join(coverWt, "owned.ts"), "export const owned = 1;\n");
@@ -1371,6 +1387,7 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
     expect(runSwarm(covered, ["finalize", "--batch", "1", "--units", "cover", "--claimed", "cover", "--check-cmd", `"${process.execPath}" -e "process.exit(0)"`]).rc).toBe(0);
 
     const modernFieldless = makeFixture();
+    ensureDagUnit(modernFieldless, "fieldless");
     runSwarm(modernFieldless, ["prepare", "--batch", "1", "--units", "fieldless", "--base", "main"]);
     const fieldlessWt = wtPath(modernFieldless, "fieldless");
     writeFileSync(join(fieldlessWt, "owned.ts"), "export const owned = 1;\n");
@@ -1384,6 +1401,7 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
     expect(fieldlessResult.out).toContain("has no Source Fingerprint");
 
     const filtered = makeFixture();
+    ensureDagUnit(filtered, "raw");
     git(filtered, ["config", "filter.tidy.clean", "sed 's/[[:space:]]*$//'"]);
     writeFileSync(join(filtered, ".gitattributes"), "filtered.ts filter=tidy\n");
     writeFileSync(join(filtered, "filtered.ts"), "export const filtered = 1;\n");
@@ -1397,20 +1415,33 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
     expect(filteredResult.out).toContain("outside unit");
 
     const legacy = makeFixture();
+    ensureDagUnit(legacy, "legacy");
     runSwarm(legacy, ["prepare", "--batch", "1", "--units", "legacy", "--base", "main"]);
     const legacyWt = wtPath(legacy, "legacy");
     writeFileSync(join(legacyWt, "owned.ts"), "export const owned = 1;\n");
     recordReview(legacyWt, "code-generation", REVIEWER, "legacy", "READY", [{ path: "different.ts" }]);
-    const shards = readdirSync(seededAuditDir(legacyWt)).filter((name) => name.endsWith(".md"));
-    for (const name of shards) {
-      const path = join(seededAuditDir(legacyWt), name);
-      writeFileSync(path, readFileSync(path, "utf-8").replace(/^\*\*Base commit\*\*: .*\r?\n/gm, ""));
+    for (const auditDir of [seededAuditDir(legacy), seededAuditDir(legacyWt)]) {
+      const shards = readdirSync(auditDir).filter((name) => name.endsWith(".md"));
+      for (const name of shards) {
+        const path = join(auditDir, name);
+        writeFileSync(
+          path,
+          readFileSync(path, "utf-8")
+            .replace(/^\*\*Base commit\*\*: .*\r?\n/gm, "")
+            .replace(/^\*\*Base Source Listing\*\*: .*\r?\n/gm, ""),
+        );
+      }
     }
-    expect(runSwarm(legacy, ["finalize", "--batch", "1", "--units", "legacy", "--claimed", "legacy", "--check-cmd", `"${process.execPath}" -e "process.exit(0)"`]).rc).toBe(0);
+    rmSync(join(legacyWt, ".aidlc", "worktree-meta.json"), { force: true });
+    rmSync(join(legacyWt, ".aidlc", "base-source-listing.tsv"), { force: true });
+    const legacyResult = runSwarm(legacy, ["finalize", "--batch", "1", "--units", "legacy", "--claimed", "legacy", "--check-cmd", `"${process.execPath}" -e "process.exit(0)"`]);
+    expect(legacyResult.out).toContain('"status": "converged"');
+    expect(legacyResult.out).not.toContain("outside unit");
   }, 120000);
 
   test("finalize refuses a claimed unit whose worktree source changed after its terminal review", () => {
     const proj = makeFixture();
+    ensureDagUnit(proj, "foo");
     runSwarm(proj, ["prepare", "--batch", "1", "--units", "foo", "--base", "main"]);
     const wt = wtPath(proj, "foo");
     writeFileSync(join(wt, "foo.ts"), "export const foo = 1;\n", "utf-8");
@@ -1445,6 +1476,7 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
     git(proj, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", origin, "vendor/sub"]);
     git(proj, ["commit", "-qm", "add submodule"]);
 
+    ensureDagUnit(proj, "subdirty");
     runSwarm(proj, ["prepare", "--batch", "1", "--units", "subdirty", "--base", "main"]);
     const wt = wtPath(proj, "subdirty");
     git(wt, ["-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive"]);
@@ -1481,6 +1513,7 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
 
   test("a finalize-time bypass cannot become fieldless legacy evidence after the switch is unset", () => {
     const proj = makeFixture();
+    ensureDagUnit(proj, "bypass");
     runSwarm(proj, ["prepare", "--batch", "1", "--units", "bypass", "--base", "main"]);
     const wt = wtPath(proj, "bypass");
     writeFileSync(join(wt, "reviewed.ts"), "export const reviewed = true;\n", "utf-8");
@@ -1592,6 +1625,7 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
 
   test("a bypassed convergence merges when the source merge repeats the switch", () => {
     const proj = makeFixture();
+    ensureDagUnit(proj, "bypass-switch");
     runSwarm(proj, ["prepare", "--batch", "1", "--units", "bypass-switch", "--base", "main"]);
     const wt = wtPath(proj, "bypass-switch");
     writeFileSync(join(wt, "reviewed.ts"), "export const reviewed = true;\n", "utf-8");
@@ -1658,6 +1692,7 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
 
   test("bypass cleanup preserves untracked and ignored application source", () => {
     const proj = makeFixture();
+    ensureDagUnit(proj, "bypass-dirty");
     runSwarm(proj, ["prepare", "--batch", "1", "--units", "bypass-dirty", "--base", "main"]);
     const wt = wtPath(proj, "bypass-dirty");
     writeFileSync(
@@ -1759,6 +1794,7 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
 
   test("a tracked symlink matched by a broad clean filter stays a symlink through finalize and merge", () => {
     const proj = makeFixture();
+    ensureDagUnit(proj, "link");
     git(proj, ["config", "core.symlinks", "true"]);
     runSwarm(proj, ["prepare", "--batch", "1", "--units", "link", "--base", "main"]);
     const wt = wtPath(proj, "link");
@@ -1790,6 +1826,7 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
 
   test("finalize merges a claimed unit whose worktree source is unchanged since its terminal review", () => {
     const proj = makeFixture();
+    ensureDagUnit(proj, "bar");
     runSwarm(proj, ["prepare", "--batch", "1", "--units", "bar", "--base", "main"]);
     const wt = wtPath(proj, "bar");
     git(wt, ["config", "filter.tidy.clean", "sed 's/[[:space:]]*$//'"]);
@@ -1864,6 +1901,7 @@ describe("t304 swarm finalize source-fingerprint check (#646 review P1#3)", () =
 
   test("discard removes the retained reviewed-source refs for that Bolt", () => {
     const proj = makeFixture();
+    ensureDagUnit(proj, "drop");
     runSwarm(proj, ["prepare", "--batch", "1", "--units", "drop", "--base", "main"]);
     const wt = wtPath(proj, "drop");
     writeFileSync(join(wt, "drop.ts"), "export const drop = true;\n", "utf-8");

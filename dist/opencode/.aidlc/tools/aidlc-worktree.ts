@@ -12,9 +12,7 @@
 // checkout.
 
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { appendAuditEntry } from "./aidlc-audit.ts";
 import {
@@ -24,6 +22,7 @@ import {
   errorMessage,
   findAllEvents,
   getField,
+  gitCommitSourceListing,
   parseSourceListing,
   readAllAuditShards,
   reviewedSourceRefPrefix,
@@ -34,7 +33,6 @@ import {
   sourceListingSha256,
   UNBINDABLE_FINGERPRINT,
   workspaceSourceFingerprint,
-  workspaceSourceListing,
   worktreePath,
   worktreeStateFilePath,
   writeFileAtomic,
@@ -248,18 +246,11 @@ function rawBaseSourceListing(
   repoCwd: string,
   baseCommit: string,
 ): { serialized: string; hash: string } | null {
-  const temp = join(tmpdir(), `aidlc-base-listing-${process.pid}-${randomUUID().slice(0, 8)}`);
-  const created = runGit(["worktree", "add", "--detach", temp, baseCommit], repoCwd);
-  if (!created.ok) return null;
-  try {
-    const listing = workspaceSourceListing(temp);
-    if (listing === null) return null;
-    const serialized = serializeSourceListing(listing);
-    if (parseSourceListing(serialized) === null) return null;
-    return { serialized, hash: `sha256:${sourceListingSha256(serialized)}` };
-  } finally {
-    runGit(["worktree", "remove", "--force", temp], repoCwd);
-  }
+  const listing = gitCommitSourceListing(repoCwd, baseCommit);
+  if (listing === null) return null;
+  const serialized = serializeSourceListing(listing);
+  if (parseSourceListing(serialized) === null) return null;
+  return { serialized, hash: `sha256:${sourceListingSha256(serialized)}` };
 }
 
 function handleCreate(args: string[]): void {
