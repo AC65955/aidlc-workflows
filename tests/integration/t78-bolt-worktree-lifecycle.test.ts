@@ -228,7 +228,77 @@ function lastEventBlock(proj: string): string[] {
   return out;
 }
 
+function eventBlock(proj: string, type: string): string {
+  return readMainAudit(proj)
+    .split("\n---\n")
+    .filter((block) => block.includes(`**Event**: ${type}`))
+    .at(-1) ?? "";
+}
+
 describe("t78 aidlc-bolt per-Bolt worktree lifecycle (migrated from t78-bolt-worktree-lifecycle.sh, plan 13)", () => {
+  describe("Base-commit attestation", () => {
+    const proj = setupLifecycleProject();
+    gitInitMain(proj);
+    const created = runWorktree(proj, "create", "--slug", "attested", "--base", "main");
+    if (created.status !== 0) {
+      throw new Error(`worktree create failed: ${created.out}`);
+    }
+    const baseCommit = (JSON.parse(created.out.trim()) as { base_commit: string }).base_commit;
+    const started = runBolt(
+      proj,
+      "start",
+      "--name",
+      "Attested Bolt",
+      "--batch",
+      "1",
+      "--worktree",
+      "--slug",
+      "attested",
+    );
+
+    test("WORKTREE_CREATED and BOLT_STARTED carry the same immutable Base commit", () => {
+      expect(created.status).toBe(0);
+      expect(started.status).toBe(0);
+      expect(eventBlock(proj, "WORKTREE_CREATED")).toContain(`**Base commit**: ${baseCommit}`);
+      expect(eventBlock(proj, "BOLT_STARTED")).toContain(`**Base commit**: ${baseCommit}`);
+      expect(
+        readFileSync(join(worktreeDir(proj, "attested"), ".aidlc", "worktree-meta.json"), "utf-8"),
+      ).toContain(`"baseCommit": "${baseCommit}"`);
+    });
+
+    test("malformed present metadata fails closed before BOLT_STARTED", () => {
+      const corruptProj = setupLifecycleProject();
+      gitInitMain(corruptProj);
+      const corruptCreated = runWorktree(
+        corruptProj,
+        "create",
+        "--slug",
+        "corrupt",
+        "--base",
+        "main",
+      );
+      expect(corruptCreated.status).toBe(0);
+      writeFileSync(
+        join(worktreeDir(corruptProj, "corrupt"), ".aidlc", "worktree-meta.json"),
+        '{"version":1,"boltSlug":"wrong","baseBranch":"main","baseCommit":"bad"}\n',
+      );
+      const corruptStart = runBolt(
+        corruptProj,
+        "start",
+        "--name",
+        "Corrupt Bolt",
+        "--batch",
+        "1",
+        "--worktree",
+        "--slug",
+        "corrupt",
+      );
+      expect(corruptStart.status).not.toBe(0);
+      expect(corruptStart.out).toContain("invalid worktree metadata");
+      expect(eventBlock(corruptProj, "BOLT_STARTED")).toBe("");
+    });
+  });
+
   // ===========================================================================
   // Lifecycle 1 — complete-merge happy path. Drives T1-T6.
   // Pre-create the worktree dir (in production aidlc-worktree create does this;

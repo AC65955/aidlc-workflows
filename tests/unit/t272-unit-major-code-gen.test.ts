@@ -261,6 +261,13 @@ function runStatusSync(proj: string, stage: string): void {
 }
 
 function logReviewReady(proj: string, stage: string, unit: string): void {
+  if (stage === "code-generation") {
+    const dir = join(seededRecordDir(proj), "construction", unit, stage);
+    writeFileSync(
+      join(dir, "source-manifest.json"),
+      `${JSON.stringify({ stage, unit, version: 1, writes: [] }, null, 2)}\n`,
+    );
+  }
   const args = [
     LOG,
     "review",

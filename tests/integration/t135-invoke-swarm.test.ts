@@ -290,8 +290,8 @@ function logWorktreeReview(
   iteration = 1,
 ): void {
   const wt = join(proj, ".aidlc", "worktrees", `bolt-${unit}`);
+  const dir = join(seededRecordDir(wt), "construction", unit, "code-generation");
   if (seedArtifacts) {
-    const dir = join(seededRecordDir(wt), "construction", unit, "code-generation");
     mkdirSync(dir, { recursive: true });
     for (const name of [
       "code-generation-plan",
@@ -307,6 +307,18 @@ function logWorktreeReview(
       if (!existsSync(artifact)) writeFileSync(artifact, body);
     }
   }
+  // The engine-required source manifest is independent of declared produces[];
+  // keep it present even in the test that deliberately omits required artifacts.
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "source-manifest.json"),
+    `${JSON.stringify({
+      stage: "code-generation",
+      unit,
+      version: 1,
+      writes: [{ path: `${unit}.txt` }],
+    }, null, 2)}\n`,
+  );
   for (const terminal of [false, true]) {
     const args = [
       LOG_TOOL,

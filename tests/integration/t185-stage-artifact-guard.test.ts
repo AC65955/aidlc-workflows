@@ -58,6 +58,17 @@ const LOG = join(AIDLC_SRC, "tools", "aidlc-log.ts");
 const MID_IDEATION = "state-mid-ideation.md"; // Current Stage: feasibility
 
 function reviewCodeGen(proj: string, unit: string): void {
+  const dir = join(seededRecordDir(proj), "construction", unit, "code-generation");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "source-manifest.json"),
+    `${JSON.stringify({
+      stage: "code-generation",
+      unit,
+      version: 1,
+      writes: [{ path: "src/" }],
+    }, null, 2)}\n`,
+  );
   const args = [
     LOG,
     "review",
@@ -72,15 +83,27 @@ function reviewCodeGen(proj: string, unit: string): void {
     "--project-dir",
     proj,
   ];
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  // Several artifact-guard fixtures are deliberately non-Git. Source binding
+  // cannot be computed there, so isolate the artifact-guard contract with the
+  // documented freshness switch while still requiring a valid manifest.
+  env.AIDLC_SKIP_SOURCE_FRESHNESS = "1";
   for (const suffix of [[], ["--verdict", "READY"]]) {
-    spawnSync(BUN, [...args, ...suffix], { encoding: "utf-8" });
+    const result = spawnSync(BUN, [...args, ...suffix], { encoding: "utf-8", env });
+    if ((result.status ?? -1) !== 0) {
+      throw new Error(`code-generation review failed: ${result.stdout ?? ""}${result.stderr ?? ""}`);
+    }
   }
 }
 
 // Drive a state subcommand with the artifact guard ENABLED (clear the suite's
 // bypass var). Returns exit code + combined output.
-function guarded(proj: string, args: string[]): { rc: number; out: string } {
-  const env = { ...process.env };
+function guarded(
+  proj: string,
+  args: string[],
+  extraEnv: Record<string, string> = {},
+): { rc: number; out: string } {
+  const env = { ...process.env, ...extraEnv };
   delete env.AIDLC_SKIP_ARTIFACT_GUARD;
   env.AIDLC_ALLOW_DIRECT_STATE_TRANSITIONS = "1";
   const r = spawnSync(BUN, [STATE, ...args, "--project-dir", proj], {
@@ -404,7 +427,9 @@ describe("t185: stage-completion artifact guard (#366)", () => {
       writeWorkspaceFile(proj, "src/auth/login.ts"); // outside aidlc/ + harness
       guarded(proj, ["gate-start", "code-generation"]);
       reviewCodeGen(proj, UNIT);
-      const r = guarded(proj, ["approve", "code-generation", "--user-input", "ok"]);
+      const r = guarded(proj, ["approve", "code-generation", "--user-input", "ok"], {
+        AIDLC_SKIP_SOURCE_FRESHNESS: "1",
+      });
       expect(r.rc).toBe(0);
     });
 

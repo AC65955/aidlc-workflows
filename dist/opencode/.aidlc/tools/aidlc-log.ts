@@ -821,7 +821,7 @@ function handleReview(args: string[]): void {
   if (flags.single === "true") fields.Workflow = `single-stage:${flags.stage}`;
   const retryPending = flags["retry-pending"] === "true";
 
-  const loadContext = () => {
+  const loadContext = (scanReceipts: boolean) => {
     const state = readStateFile(pd, intent, space);
     const node = loadStageGraphAll().find((stage) => stage.slug === flags.stage);
     if (!node?.reviewer) {
@@ -870,8 +870,12 @@ function handleReview(args: string[]): void {
         // Class resolution fails open; ordinal enforcement remains active.
       }
     }
+    // Receipt freshness is needed only while minting REVIEW_REQUESTED (to
+    // classify bounded stale-receipt recovery). REVIEW_COMPLETED consumes only
+    // node + attempt and then performs its one authoritative source-state walk
+    // while stamping; scanning here would double-walk on every re-review.
     const receipts =
-      reviewClass === null
+      !scanReceipts || reviewClass === null
         ? null
         : freshReviewReceipts(pd, state, node, { reviewClass });
     return { state, node, attempt, budget, receipts, autonomousCandidate };
@@ -895,7 +899,7 @@ function handleReview(args: string[]): void {
           budget,
           receipts,
           autonomousCandidate,
-        } = loadContext();
+        } = loadContext(true);
         const expected = attempt.requestCount + 1;
         const sameSourceRecoveryScope =
           receipts?.newestSourceUnit === (flags.unit ?? null);
@@ -1036,7 +1040,7 @@ function handleReview(args: string[]): void {
 
   try {
     withAuditLock(pd, () => {
-      const { node, attempt } = loadContext();
+      const { node, attempt } = loadContext(false);
       if (!attempt.pendingIterations.has(iteration)) {
         refuseReview(
           `Refusing REVIEW_COMPLETED for "${flags.stage}": no unmatched ` +

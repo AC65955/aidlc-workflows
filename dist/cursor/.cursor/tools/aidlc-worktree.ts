@@ -295,7 +295,10 @@ function handleCreate(args: string[]): void {
     errorWithSlug(slug, `Audit emission failed: ${errorMessage(e)}`);
   }
 
-  const add = runGit(["worktree", "add", wtPath, "-b", branchName, flags.base], repoCwd);
+  // Create from the immutable object just attested above. Keeping flags.base
+  // here would allow a concurrently-moved branch to fork a different tree than
+  // WORKTREE_CREATED/worktree-meta.json record.
+  const add = runGit(["worktree", "add", wtPath, "-b", branchName, baseCommit], repoCwd);
   if (!add.ok) {
     errorWithSlug(
       slug,

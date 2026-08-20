@@ -57,6 +57,7 @@ import {
   seedBoltDagBatches,
   seededAuditDir,
   seededAuditShard,
+  seededRecordDir,
   seededStateFile,
 } from "../harness/fixtures.ts";
 
@@ -287,6 +288,12 @@ function runReport(proj: string): Directive {
 }
 
 function logReviewReady(proj: string, unit: string): void {
+  const dir = join(seededRecordDir(proj), "construction", unit, "code-generation");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "source-manifest.json"),
+    `${JSON.stringify({ stage: "code-generation", unit, version: 1, writes: [] }, null, 2)}\n`,
+  );
   const args = [
     LOG,
     "review",

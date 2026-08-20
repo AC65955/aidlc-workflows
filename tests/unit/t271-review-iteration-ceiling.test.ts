@@ -118,6 +118,13 @@ function writeReviewedArtifact(
       : "code-generation-plan.md",
   );
   writeFileSync(path, content, "utf-8");
+  if (stage === "code-generation" && unit) {
+    writeFileSync(
+      join(dir, "source-manifest.json"),
+      `${JSON.stringify({ stage, unit, version: 1, writes: [] }, null, 2)}\n`,
+      "utf-8",
+    );
+  }
   return path;
 }
 

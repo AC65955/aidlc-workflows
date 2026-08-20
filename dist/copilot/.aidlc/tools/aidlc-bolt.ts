@@ -39,6 +39,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendAuditEntry, appendAuditEntryUnlocked } from "./aidlc-audit.ts";
 import {
@@ -177,6 +178,47 @@ function parseFlags(args: string[]): Record<string, string> {
   return flags;
 }
 
+function worktreeBaseCommit(
+  projectDir: string,
+  slug: string,
+): string | null {
+  const metaPath = join(worktreePath(projectDir, slug), ".aidlc", "worktree-meta.json");
+  if (!existsSync(metaPath)) return null; // pre-#662 worktree migration
+
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(metaPath, "utf-8")) as unknown;
+  } catch (e) {
+    throw new Error(`invalid worktree metadata at ${metaPath}: ${errorMessage(e)}`);
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`invalid worktree metadata at ${metaPath}: expected an object`);
+  }
+  const meta = value as Record<string, unknown>;
+  const allowed = new Set(["version", "boltSlug", "baseBranch", "baseCommit"]);
+  const unknown = Object.keys(meta).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) {
+    throw new Error(
+      `invalid worktree metadata at ${metaPath}: unknown field(s): ${unknown.sort().join(", ")}`,
+    );
+  }
+  if (meta.version !== 1) {
+    throw new Error(`invalid worktree metadata at ${metaPath}: version must equal 1`);
+  }
+  if (meta.boltSlug !== slug) {
+    throw new Error(
+      `invalid worktree metadata at ${metaPath}: boltSlug must equal ${JSON.stringify(slug)}`,
+    );
+  }
+  if (typeof meta.baseBranch !== "string" || meta.baseBranch.length === 0) {
+    throw new Error(`invalid worktree metadata at ${metaPath}: baseBranch must be non-empty`);
+  }
+  if (typeof meta.baseCommit !== "string" || !/^[0-9a-f]{40,64}$/.test(meta.baseCommit)) {
+    throw new Error(`invalid worktree metadata at ${metaPath}: baseCommit must be a Git object id`);
+  }
+  return meta.baseCommit;
+}
+
 // --- Subcommand: start ---
 // Usage: aidlc-bolt start --name <bolt-names> --batch <n>
 //                         [--walking-skeleton true|false]
@@ -221,11 +263,13 @@ function handleStart(args: string[]): void {
   // Validate state-file shape FIRST. setFieldStrict-equivalent: read state
   // and confirm we can find it; if not, fail before any audit emit so a
   // missing state file doesn't leave an orphan BOLT_STARTED.
+  let baseCommit: string | null = null;
   if (useWorktree) {
     try {
       readStateFile(pd);
+      baseCommit = worktreeBaseCommit(pd, flags.slug);
     } catch (e) {
-      failJson("start-worktree", flags.slug, "state-read-failed", errorMessage(e));
+      failJson("start-worktree", flags.slug, "state-or-worktree-meta-read-failed", errorMessage(e));
     }
   }
 
@@ -241,6 +285,7 @@ function handleStart(args: string[]): void {
     };
     if (useWorktree) {
       fields["Bolt slug"] = flags.slug;
+      if (baseCommit !== null) fields["Base commit"] = baseCommit;
     }
     emitAudit(pd, "BOLT_STARTED", fields, flags.intent, flags.space);
   } catch (e) {
