@@ -57,6 +57,7 @@ import { join } from "node:path";
 import {
   readAllAuditShards,
   workspaceSourceFingerprint,
+  workspaceSourceListing,
 } from "../../dist/claude/.claude/tools/aidlc-lib.ts";
 import {
   AIDLC_SRC,
@@ -144,6 +145,26 @@ function recordReview(
       );
       if (!existsSync(path)) writeFileSync(path, `# ${artifact}\n`, "utf-8");
     }
+
+    // Step 3's producer requires a valid manifest before a terminal per-unit
+    // receipt can be minted. Preserve every existing t304 scenario by claiming
+    // the complete current source listing; Step 6 narrows claims per scenario.
+    const listing = workspaceSourceListing(proj);
+    const writes = listing === null
+      ? []
+      : [...listing.keys()].map((key) => {
+          const separator = key.indexOf("\0");
+          const repo = key.slice(0, separator);
+          const path = key.slice(separator + 1);
+          return repo.length > 0 ? { repo, path } : { path };
+        });
+    // A valid empty manifest is conservative only for an unlistable fixture;
+    // normal Git fixtures claim every listed application-source path above.
+    writeFileSync(
+      join(artifactDir, "source-manifest.json"),
+      `${JSON.stringify({ stage, unit, version: 1, writes }, null, 2)}\n`,
+      "utf-8",
+    );
   }
   const audit = readAllAuditShards(proj).replace(/\r\n/g, "\n");
   const priorRequests = audit

@@ -54,7 +54,9 @@ import {
   getField,
   holdsAuditLock,
   hooksHealthDir,
+  intentRepos,
   isAutonomousMode,
+  isGitRepoDir,
   isoTimestamp,
   isPackageJson,
   codekbRepoName,
@@ -86,6 +88,7 @@ import {
   readCurrentSessionId,
   readStateFile,
   refreshActiveDirectiveMarker,
+  repoDir,
   resolveBirthRepoSet,
   resolveProjectDir,
   setActiveIntentCursor,
@@ -94,6 +97,7 @@ import {
   SLUG_TAG_REGEX,
   spacesRoot,
   type StageEntry,
+  UNBINDABLE_FINGERPRINT,
   setCheckbox,
   setField,
   setPhaseProgress,
@@ -108,6 +112,8 @@ import {
   stageEnabledBySelection,
   stagesInScope,
   stateFilePath,
+  workspaceSourceState,
+  writeBaselineSourceSnapshot,
   withAuditLock,
   validateBoltSlug,
   validScopes,
@@ -279,6 +285,30 @@ function appendAuditEvent(
   } else {
     appendAuditEntry(event, fields, projectDir);
   }
+}
+
+// Compute and persist a stage source baseline in one listing pass. A workspace
+// with no Git checkout omits the migration field; a configured Git checkout
+// whose listing cannot be read records an explicit fail-closed marker.
+function sourceBaselineFields(
+  projectDir: string,
+  stageSlug: string,
+): Record<string, string> {
+  const repos = intentRepos(projectDir);
+  const hasGitCheckout = repos.length === 0
+    ? isGitRepoDir(projectDir)
+    : repos.some((name) => isGitRepoDir(repoDir(projectDir, name)));
+  const sourceState = workspaceSourceState(projectDir);
+  if (sourceState === null) {
+    return hasGitCheckout ? { "Source Baseline": UNBINDABLE_FINGERPRINT } : {};
+  }
+  return {
+    "Source Baseline": writeBaselineSourceSnapshot(
+      projectDir,
+      stageSlug,
+      sourceState.listing,
+    ),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -3975,6 +4005,7 @@ function handleIntentCreate(projectDir: string, flags: Record<string, string>): 
     appendAuditEvent(projectDir, "WORKFLOW_STARTED", {
       Scope: scope,
       Request: `/aidlc ${flags.arguments || scope}`,
+      ...sourceBaselineFields(projectDir, "code-generation"),
       ...(reviewOverride !== undefined
         ? {
             "Review Override":

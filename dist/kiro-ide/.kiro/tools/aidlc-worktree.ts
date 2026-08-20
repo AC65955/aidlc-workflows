@@ -12,8 +12,8 @@
 // checkout.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { appendAuditEntry } from "./aidlc-audit.ts";
 import {
   auditBlockField,
@@ -31,6 +31,7 @@ import {
   workspaceSourceFingerprint,
   worktreePath,
   worktreeStateFilePath,
+  writeFileAtomic,
 } from "./aidlc-lib.js";
 
 // kebab-case slug shape: lowercase letter, then lowercase letters / digits /
@@ -40,6 +41,7 @@ import {
 const SLUG_RE = /^[a-z][a-z0-9-]*$/;
 
 const VALID_STRATEGIES = new Set(["squash", "merge", "rebase"]);
+const WORKTREE_META_FILENAME = "worktree-meta.json";
 const VALID_VERIFY_EVENTS = new Set([
   "WORKTREE_CREATED",
   "WORKTREE_MERGED",
@@ -251,6 +253,20 @@ function handleCreate(args: string[]): void {
   if (!baseExists.ok) {
     errorWithSlug(slug, `Base branch does not exist locally: ${flags.base}`);
   }
+  // Resolve the exact commit object before emitting or creating anything. The
+  // durable per-worktree metadata lets swarm finalize read the fork point even
+  // if the human-readable base branch moves later.
+  const baseCommitResult = runGit(
+    ["rev-parse", "--verify", `${flags.base}^{commit}`],
+    repoCwd,
+  );
+  if (!baseCommitResult.ok) {
+    errorWithSlug(slug, `Base branch does not resolve to a commit: ${flags.base}`);
+  }
+  const baseCommit = baseCommitResult.stdout.trim();
+  if (!/^[0-9a-f]{40,64}$/.test(baseCommit)) {
+    errorWithSlug(slug, `Base branch resolved to an invalid commit id: ${flags.base}`);
+  }
 
   const wtPath = worktreePath(pd, slug);
   if (existsSync(wtPath)) {
@@ -273,6 +289,7 @@ function handleCreate(args: string[]): void {
       "Worktree path": wtPath,
       "Branch name": branchName,
       "Base branch": flags.base,
+      "Base commit": baseCommit,
     }, flags.intent, flags.space);
   } catch (e) {
     errorWithSlug(slug, `Audit emission failed: ${errorMessage(e)}`);
@@ -286,6 +303,26 @@ function handleCreate(args: string[]): void {
     );
   }
 
+  const metaPath = join(wtPath, ".aidlc", WORKTREE_META_FILENAME);
+  try {
+    mkdirSync(dirname(metaPath), { recursive: true });
+    writeFileAtomic(
+      metaPath,
+      `${JSON.stringify(
+        {
+          version: 1,
+          boltSlug: slug,
+          baseBranch: flags.base,
+          baseCommit,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  } catch (e) {
+    errorWithSlug(slug, `Worktree metadata write failed: ${errorMessage(e)}`);
+  }
+
   console.log(
     JSON.stringify({
       emitted: "WORKTREE_CREATED",
@@ -293,6 +330,7 @@ function handleCreate(args: string[]): void {
       worktree_path: wtPath,
       branch: branchName,
       base: flags.base,
+      base_commit: baseCommit,
       audit_timestamp: auditTs,
     })
   );

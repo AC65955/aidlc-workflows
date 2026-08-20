@@ -7,6 +7,8 @@ import {
   findStageBySlug,
   firstInScopeStageOfPhase,
   getField,
+  intentRepos,
+  isGitRepoDir,
   isoTimestamp,
   loadScopeMapping,
   loadStageGraph,
@@ -16,13 +18,17 @@ import {
   parseCheckboxes,
   parseStateStageSuffixes,
   readStateFile,
+  repoDir,
   resolveProjectDir,
   resolveStage,
   type StageEntry,
+  UNBINDABLE_FINGERPRINT,
   setCheckbox,
   setField,
   setPhaseProgress,
   stageIndex,
+  workspaceSourceState,
+  writeBaselineSourceSnapshot,
   writeStateFile,
 } from "./aidlc-lib.js";
 
@@ -46,6 +52,27 @@ function emitAudit(
   fields: Record<string, string>
 ): void {
   appendAuditEntry(eventType, fields, pd);
+}
+
+function sourceBaselineFields(
+  projectDir: string,
+  stageSlug: string,
+): Record<string, string> {
+  const repos = intentRepos(projectDir);
+  const hasGitCheckout = repos.length === 0
+    ? isGitRepoDir(projectDir)
+    : repos.some((name) => isGitRepoDir(repoDir(projectDir, name)));
+  const sourceState = workspaceSourceState(projectDir);
+  if (sourceState === null) {
+    return hasGitCheckout ? { "Source Baseline": UNBINDABLE_FINGERPRINT } : {};
+  }
+  return {
+    "Source Baseline": writeBaselineSourceSnapshot(
+      projectDir,
+      stageSlug,
+      sourceState.listing,
+    ),
+  };
 }
 
 // --- CLI entry point ---
@@ -441,13 +468,15 @@ function handleExecute(args: string[]): void {
       });
     }
 
-    // The canonical STAGE_JUMPED event for the target itself
+    // The jump boundary owns the baseline. Its companion STAGE_STARTED row
+    // remains field-free so one transition never creates competing snapshots.
     emitAudit(pd, "STAGE_JUMPED", {
       Direction: direction.toUpperCase(),
       Source: currentSlug,
       Target: targetSlug,
       Scope: scope,
       Details: `${direction.toUpperCase()} jump from ${currentSlug} to ${targetSlug} (${targetStage.number}). Scope: ${scope}.`,
+      ...sourceBaselineFields(pd, "code-generation"),
     });
 
     // Target enters Active state — emit STAGE_STARTED so audit reflects the

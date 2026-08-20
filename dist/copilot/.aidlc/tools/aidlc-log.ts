@@ -29,7 +29,9 @@ import {
   parseCheckboxes,
   readAllAuditShards,
   readStateFile,
+  readUnitSourceManifest,
   recordDir,
+  relativeRecordDir,
   reviewArtifactFingerprint,
   resolveProjectDir,
   resolveReviewClass,
@@ -39,7 +41,8 @@ import {
   toPosix,
   UNBINDABLE_FINGERPRINT,
   withAuditLock,
-  workspaceSourceFingerprint,
+  workspaceSourceState,
+  writeUnitSourceSnapshot,
 } from "./aidlc-lib.js";
 import type { ReviewClass } from "./aidlc-lib.js";
 
@@ -1047,13 +1050,50 @@ function handleReview(args: string[]): void {
         );
       }
       fields["Artifact Fingerprint"] = fingerprint;
-      // Bind the terminal receipt to the workspace source state the reviewer
-      // inspected. Only workspace-writing stages carry this binding. A newly
-      // unbindable receipt records that explicitly so completion fails closed;
-      // only genuinely legacy fieldless receipts keep migration behavior.
+
+      const bindsUnitSource =
+        node.workspace_requires === true &&
+        flags.unit !== undefined &&
+        node.for_each === "unit-of-work" &&
+        flags.single !== "true";
+      const manifest = bindsUnitSource
+        ? readUnitSourceManifest(pd, flags.stage, flags.unit as string)
+        : null;
+      const sourceBindingBypassed =
+        manifest?.ok === false && process.env.AIDLC_SKIP_SOURCE_FRESHNESS === "1";
+      if (manifest?.ok === false && !sourceBindingBypassed) {
+        const manifestPath = `${relativeRecordDir(pd, intent, space) ?? "aidlc"}/construction/${flags.unit}/${flags.stage}/source-manifest.json`;
+        refuseReview(
+          `Cannot record review for "${flags.stage}": unit "${flags.unit}" has no valid source manifest at ` +
+            `${manifestPath} (${manifest.reason}). Write the manifest listing every application-source path ` +
+            "this unit created or modified — including shell- or generator-written files — then request and " +
+            "record the review again.",
+        );
+      }
+
+      // One temporary-index pass supplies both the compatibility fingerprint
+      // and the per-unit listing. A null state is recorded explicitly so new
+      // receipts fail closed while fieldless legacy evidence keeps migrating.
       if (node.workspace_requires) {
+        const sourceState = workspaceSourceState(pd);
         fields["Source Fingerprint"] =
-          workspaceSourceFingerprint(pd) ?? UNBINDABLE_FINGERPRINT;
+          sourceState?.fingerprint ?? UNBINDABLE_FINGERPRINT;
+        if (bindsUnitSource) {
+          if (sourceBindingBypassed) {
+            fields["Unit Source Binding Bypass"] = "true";
+          } else if (sourceState === null) {
+            fields["Unit Source Fingerprint"] = UNBINDABLE_FINGERPRINT;
+          } else if (manifest?.ok === true) {
+            fields["Unit Source Fingerprint"] = writeUnitSourceSnapshot(
+              pd,
+              flags.stage,
+              flags.unit as string,
+              sourceState.listing,
+              manifest,
+              manifest.rawBytesSha256,
+            );
+          }
+        }
       }
       emitAudit(pd, "REVIEW_COMPLETED", fields, intent, space);
     }, intent, space);

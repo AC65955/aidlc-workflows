@@ -31,6 +31,7 @@ import {
   isAutonomousConstructionDecision,
   isAutonomousMode,
   isAutonomousSwarmStage,
+  isGitRepoDir,
   isNonAnswer,
   isRegularFile,
   isoTimestamp,
@@ -53,6 +54,7 @@ import {
   removeField,
   removeSlug,
   replaceSection,
+  repoDir,
   selfAttributedDecisionMarker,
   resolveBoltDag,
   reviewArtifactFingerprint,
@@ -67,12 +69,15 @@ import {
   stagesInScope,
   swarmConvergedUnits,
   updateIntentStatus,
+  UNBINDABLE_FINGERPRINT,
   validateUnitName,
   validScopes,
   withAuditLock,
   worktreeDocsDir,
   worktreePath,
   worktreeStateFilePath,
+  workspaceSourceState,
+  writeBaselineSourceSnapshot,
   writeStateFile,
   writeFileAtomic,
 } from "./aidlc-lib.js";
@@ -92,6 +97,27 @@ const VALID_CHECKBOX_STATES: CheckboxState[] = [
   "completed",
   "skipped",
 ];
+
+function sourceBaselineFields(
+  projectDir: string,
+  stageSlug: string,
+): Record<string, string> {
+  const repos = intentRepos(projectDir);
+  const hasGitCheckout = repos.length === 0
+    ? isGitRepoDir(projectDir)
+    : repos.some((name) => isGitRepoDir(repoDir(projectDir, name)));
+  const sourceState = workspaceSourceState(projectDir);
+  if (sourceState === null) {
+    return hasGitCheckout ? { "Source Baseline": UNBINDABLE_FINGERPRINT } : {};
+  }
+  return {
+    "Source Baseline": writeBaselineSourceSnapshot(
+      projectDir,
+      stageSlug,
+      sourceState.listing,
+    ),
+  };
+}
 
 function isCheckboxState(s: string): s is CheckboxState {
   return (VALID_CHECKBOX_STATES as readonly string[]).includes(s);
@@ -2243,6 +2269,9 @@ function handleAdvance(args: string[]): void {
     emitAudit(pd, "STAGE_STARTED", {
       Stage: nextSlug,
       Agent: nextStage.lead_agent,
+      ...(nextStage.workspace_requires
+        ? sourceBaselineFields(pd, nextSlug)
+        : {}),
     });
   } catch (e) {
     error(`Audit emission failed: ${errorMessage(e)}`);
