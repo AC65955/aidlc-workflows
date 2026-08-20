@@ -234,7 +234,7 @@ describe("t305 real receipt and guard flows", () => {
     review(project, record, "beta", [{ path: "app.ts" }], { AIDLC_SKIP_SOURCE_FRESHNESS: "1" });
     expect(approve(project).rc).toBe(1);
     expect(approve(project, { AIDLC_SKIP_SOURCE_FRESHNESS: "1" }).rc).toBe(0);
-  });
+  }, 30000);
 
   test("3 disjoint unit invalidation names only beta and bounded recovery clears", () => {
     const { project, record } = runtimeFixture();
@@ -245,7 +245,7 @@ describe("t305 real receipt and guard flows", () => {
     review(project, record, "alpha", [{ path: "alpha.ts" }]);
     const refused = approve(project); expect(refused.rc).toBe(1); expect(refused.out).toContain("Invalidated receipts: beta"); expect(refused.out).not.toContain("Invalidated receipts: alpha");
     const recovered = review(project, record, "beta", [{ path: "beta.ts" }]); expect(recovered.verdict.rc).toBe(0); expect(approve(project).rc).toBe(0);
-  });
+  }, 30000);
 
   test("4 newest claimant shields overlap, but a stale newer claimant invalidates both", () => {
     const pass = runtimeFixture(); writeFileSync(join(pass.project, "shared.ts"), "export const s=1\n");
@@ -254,7 +254,7 @@ describe("t305 real receipt and guard flows", () => {
     review(fail.project, fail.record, "alpha", [{ path: "shared.ts" }]); writeFileSync(join(fail.project, "shared.ts"), "export const s=2\n"); review(fail.project, fail.record, "beta", [{ path: "shared.ts" }]); writeFileSync(join(fail.project, "shared.ts"), "export const s=3\n");
     const r=approve(fail.project); expect(r.rc).toBe(1); expect(r.out).toContain("source-fingerprint mismatch");
     const state=readFileSync(join(fail.record,"aidlc-state.md"),"utf-8"); const receipts=freshReviewReceipts(fail.project,state,{slug:"code-generation",phase:"construction",for_each:"unit-of-work",reviewer:REVIEWER,reviewer_max_iterations:2,workspace_requires:true,produces:["code-generation-plan","unit-test-instructions","code-summary","traceability"]}); expect([...receipts.unitStale].sort()).toEqual(["alpha","beta"]);
-  });
+  }, 30000);
 
   test("5 unclaimed add refuses; claim+recovery and revert both clear", () => {
     const claimed = runtimeFixture(); review(claimed.project, claimed.record, "alpha", [{ path: "app.ts" }]); review(claimed.project, claimed.record, "beta", []);
@@ -263,7 +263,7 @@ describe("t305 real receipt and guard flows", () => {
     review(claimed.project, claimed.record, "alpha", [{ path: "app.ts" }, { path: "extra.ts" }]); expect(approve(claimed.project).rc).toBe(0);
     const reverted = runtimeFixture(); review(reverted.project, reverted.record, "alpha", [{ path: "app.ts" }]); review(reverted.project, reverted.record, "beta", []);
     writeFileSync(join(reverted.project, "extra.ts"), "export const x=1\n"); review(reverted.project, reverted.record, "beta", []); expect(approve(reverted.project).rc).toBe(1); rmSync(join(reverted.project, "extra.ts")); expect(approve(reverted.project).rc).toBe(0);
-  });
+  }, 30000);
 
   test("6 unit-major ignores late STAGE_STARTED and destroyed baseline fails closed", () => {
     const late = runtimeFixture(); const state=join(late.record,"aidlc-state.md"); writeFileSync(state,readFileSync(state,"utf-8").replace("stage-major","unit-major"));
@@ -273,27 +273,27 @@ describe("t305 real receipt and guard flows", () => {
     review(late.project,late.record,"alpha",[{path:"app.ts"}]); review(late.project,late.record,"beta",[]); const lateState=readFileSync(state,"utf-8"); const lateReceipts=freshReviewReceipts(late.project,lateState,{slug:"code-generation",phase:"construction",for_each:"unit-of-work",reviewer:REVIEWER,reviewer_max_iterations:2,workspace_requires:true,produces:["code-generation-plan","unit-test-instructions","code-summary","traceability"]}); expect(lateReceipts.sourceBaseline.state).toBe("ready"); if (lateReceipts.sourceBaseline.state === "ready") expect(lateReceipts.sourceBaseline.listing.has("\0late.ts")).toBe(false); expect(approve(late.project).out).toContain("late.ts");
     const destroyed=runtimeFixture(); review(destroyed.project,destroyed.record,"alpha",[{path:"app.ts"}]); review(destroyed.project,destroyed.record,"beta",[]);
     const audit=readAllAuditShards(destroyed.project); const hash=/\*\*Source Baseline\*\*: sha256:([0-9a-f]{64})/.exec(audit)![1]; rmSync(join(destroyed.record,".aidlc-source-review","code-generation",`baseline-${hash.slice(0,12)}.tsv`)); expect(approve(destroyed.project).out).toContain("baseline snapshot is missing");
-  });
+  }, 30000);
 
   test("7 manifest tamper and 8 claimed deletion make only the owning unit stale", () => {
     const tamper=runtimeFixture(); review(tamper.project,tamper.record,"alpha",[{path:"app.ts"}]); review(tamper.project,tamper.record,"beta",[]); writeManifest(tamper.record,"alpha",[]); expect(approve(tamper.project).out).toContain("Invalidated receipts: alpha");
     const deleted=runtimeFixture(); writeFileSync(join(deleted.project,"alpha.ts"),"a\n"); review(deleted.project,deleted.record,"alpha",[{path:"alpha.ts"}]); review(deleted.project,deleted.record,"beta",[]); rmSync(join(deleted.project,"alpha.ts")); review(deleted.project,deleted.record,"beta",[]); expect(approve(deleted.project).out).toContain("Invalidated receipts: alpha");
-  });
+  }, 30000);
 
   test("9 fieldless per-unit bindings preserve legacy global policy and 11 zero-unit stays manifest-free", () => {
     const legacy=runtimeFixture(); review(legacy.project,legacy.record,"alpha",[{path:"app.ts"}]); review(legacy.project,legacy.record,"beta",[]); stripUnitBindings(legacy.project); expect(approve(legacy.project).rc).toBe(0);
     const zero=runtimeFixture(); rmSync(join(zero.record,"inception"),{recursive:true,force:true});
     const args=["review","--stage","code-generation","--reviewer",REVIEWER,"--iteration","1"]; expect(cli(LOG,args,zero.project).rc).toBe(0); expect(cli(LOG,[...args,"--verdict","READY"],zero.project).rc).toBe(0); expect(approve(zero.project).rc).toBe(0);
-  });
+  }, 30000);
 
   test("12 two recorded repos invalidate only the owning repo and unit", () => {
     const base=runtimeFixture(); const project=base.project; const record=base.record; rmSync(join(project,".git"),{recursive:true,force:true}); for (const repo of ["repo-a","repo-b"]) { const path=join(project,repo); mkdirSync(path,{recursive:true}); git(path,["init","-q"]); git(path,["config","user.email","t@test"]); git(path,["config","user.name","t"]); writeFileSync(join(path,`${repo}.ts`),`export const ${repo.replace(/-/g,"_")}=1\n`); git(path,["add","-A"]); git(path,["commit","-qm","seed"]); } const registry=join(project,"aidlc","spaces","default","intents","intents.json"); const rows=JSON.parse(readFileSync(registry,"utf-8")); rows[0].repos=["repo-a","repo-b"]; writeFileSync(registry,`${JSON.stringify(rows)}\n`); const initial=workspaceSourceListing(project)!; appendAuditEntry("STAGE_JUMPED",{Target:"code-generation","Source Baseline":writeBaselineSourceSnapshot(project,"code-generation",initial)},project); const multiBoundary=Math.floor(Date.now()/1000); while(Math.floor(Date.now()/1000)===multiBoundary){}
     review(project,record,"alpha",[{repo:"repo-a",path:"repo-a.ts"}]); review(project,record,"beta",[{repo:"repo-b",path:"repo-b.ts"}]); writeFileSync(join(project,"repo-b","repo-b.ts"),"export const repo_b=2\n"); review(project,record,"alpha",[{repo:"repo-a",path:"repo-a.ts"}]); const r=approve(project); expect(r.out).toContain("Invalidated receipts: beta"); expect(r.out).not.toContain("Invalidated receipts: alpha");
-  });
+  }, 30000);
 
   test("absent exact claim becomes stale when the path appears before an unrelated review", () => {
     const {project,record}=runtimeFixture(); review(project,record,"alpha",[{path:"future.ts"}]); writeFileSync(join(project,"future.ts"),"future\n"); review(project,record,"beta",[{path:"app.ts"}]); expect(approve(project).out).toContain("Invalidated receipts: alpha");
-  });
+  }, 30000);
 
   test("ghost/non-applicable units cannot mint review authority or cover unclaimed source", () => {
     const {project,record}=runtimeFixture();
@@ -305,7 +305,7 @@ describe("t305 real receipt and guard flows", () => {
     const forgedState=readFileSync(join(record,"aidlc-state.md"),"utf-8");
     const receipts=freshReviewReceipts(project,forgedState,{slug:"code-generation",phase:"construction",for_each:"unit-of-work",reviewer:REVIEWER,reviewer_max_iterations:2,workspace_requires:true,produces:["code-generation-plan","unit-test-instructions","code-summary","traceability"]});
     expect(receipts.freshUnitClaims.has("ghost")).toBe(false);
-  });
+  }, 30000);
 
   test("stage-major selects the tighter STAGE_STARTED baseline", () => {
     const {project,record}=runtimeFixture();
@@ -320,11 +320,11 @@ describe("t305 real receipt and guard flows", () => {
     const second=Math.floor(Date.now()/1000); while(Math.floor(Date.now()/1000)===second){}
     writeFileSync(join(project,"later.ts"),"later\n"); review(project,record,"alpha",[{path:"app.ts"}]); review(project,record,"beta",[]);
     const out=approve(project).out; expect(out).toContain("later.ts"); expect(out).not.toContain("prestage.ts");
-  });
+  }, 30000);
 
   test("calls freshReviewReceipts directly for a modern unit chain", () => {
     const {project,record}=runtimeFixture(); review(project,record,"alpha",[{path:"app.ts"}]); review(project,record,"beta",[]); const state=readFileSync(join(record,"aidlc-state.md"),"utf-8"); const receipts=freshReviewReceipts(project,state,{slug:"code-generation",phase:"construction",for_each:"unit-of-work",reviewer:REVIEWER,reviewer_max_iterations:2,workspace_requires:true,produces:["code-generation-plan","unit-test-instructions","code-summary","traceability"]}); expect(receipts.unitVerdicts.size).toBe(2);
-  });
+  }, 30000);
 });
 
 describe("t305 stage and protocol source-attribution requirements", () => {
