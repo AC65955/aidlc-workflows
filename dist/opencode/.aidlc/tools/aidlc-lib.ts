@@ -5553,9 +5553,21 @@ export function filteredRawIndexEntries(
   return cleanFilteredRawLines(repoDir, env, paths)?.entries ?? null;
 }
 
+export type WorkspaceSourceListing = Map<string, string>;
+
+export interface WorkspaceSourceState {
+  fingerprint: string;
+  listing: WorkspaceSourceListing;
+}
+
+interface GitTreeSourceState extends WorkspaceSourceState {}
+
 // `carriesWorkspaceShell` is REQUIRED, never defaulted: a new call site must
 // decide, so the shell exclusion cannot leak into a derived dir by omission.
-function gitTreeFingerprint(repoDir: string, carriesWorkspaceShell: boolean): string | null {
+// The fingerprint and per-path listing deliberately come from this SAME temp
+// index pass. A caller that needs both must use workspaceSourceState(), rather
+// than independently invoking the compatibility fingerprint/listing wrappers.
+function gitTreeSourceState(repoDir: string, carriesWorkspaceShell: boolean): GitTreeSourceState | null {
   if (!isGitRepoDir(repoDir)) return null;
   const idx = join(
     tmpdir(),
@@ -5568,14 +5580,9 @@ function gitTreeFingerprint(repoDir: string, carriesWorkspaceShell: boolean): st
     spawnSync("git", ["-C", repoDir, "read-tree", "HEAD"], { env, encoding: "utf-8" });
     const add = spawnSync("git", ["-C", repoDir, "add", "-A"], { env, encoding: "utf-8" });
     if (add.status !== 0) return null;
-    // Drop the aidlc workspace family from the fingerprint, at ANY depth: the
-    // record tree is COMMITTED by design and mutates on every engine action
-    // (the very REVIEW_COMPLETED append this fingerprint is stamped into,
-    // gate rows, state updates), so including it would make every receipt
-    // stale by the time the completion guard recomputes. Record-artifact
-    // freshness is already covered by the audit-event invalidation; this
-    // fingerprint is the APPLICATION SOURCE binding. --ignore-unmatch keeps
-    // this a no-op when nothing matches (sibling repos with no aidlc tree).
+    // Drop the aidlc workspace family from the fingerprint and listing. The
+    // root shell names apply only where the workspace shell lives; the sensor
+    // cache glob remains depth-tolerant exactly as documented above.
     const excluded = [
       ...(carriesWorkspaceShell ? AIDLC_SHELL_DIR_NAMES : []),
       ...AIDLC_SENSOR_CACHE_GLOBS,
@@ -5589,79 +5596,75 @@ function gitTreeFingerprint(repoDir: string, carriesWorkspaceShell: boolean): st
     }
     const wt = spawnSync("git", ["-C", repoDir, "write-tree"], { env, encoding: "utf-8" });
     if (wt.status !== 0) return null;
-    const sha = wt.stdout.trim();
-    if (sha.length === 0) return null;
+    const treeSha = wt.stdout.trim();
+    if (treeSha.length === 0) return null;
 
-    // A submodule is recorded in the tree above as a gitlink (its checked-out
-    // commit sha), so editing its tracked source WITHOUT committing inside the
-    // submodule leaves the gitlink - and therefore `sha` above - unchanged,
-    // shipping a reviewed-then-edited submodule as if nothing had changed.
-    // Fold each INITIALIZED submodule's own fingerprint (recursive - a
-    // submodule can itself nest submodules) into the parent's. An
-    // uninitialized submodule has no materialized content in the workspace,
-    // so it contributes nothing to bind. Gitlinks are read straight off the
-    // temp index (mode 160000 in `ls-files -s`) rather than via `git submodule
-    // status`, which spawns the submodule subsystem and measured 1s+ per call
-    // on Windows - a cost this fingerprint (recomputed on every completion
-    // route) cannot afford.
-    //
-    // `-z` is required, not cosmetic (#646 review): without
-    // it, git's default `core.quotePath` wraps a path containing a non-ASCII
-    // byte or other "unusual" character in double quotes and C-escapes it
-    // (e.g. `"vendor/caf\303\251"` for `vendor/café`) - parsed as a literal
-    // string, that quoted-and-escaped text never resolves to the real
-    // on-disk path, so `isGitRepoDir` silently reports "not a submodule" and
-    // the fingerprint drops it entirely (a reviewed-then-edited submodule at
-    // such a path would ship unreviewed). `-z` disables quoting and
-    // NUL-terminates each record instead of newline-terminating it, so the
-    // path bytes come back exactly as they are on disk.
-    // A large index overruns the default buffer: the call then fails with
-    // ENOBUFS, and every submodule and clean-filtered path drops out of the
-    // fingerprint while the bare tree sha is still returned as if the repo had
-    // neither (#646 review - reproduced at 8,000 tracked paths / 1.68 MB of
-    // listing). Sized well past any index this is expected to meet.
-    const lsFiles = spawnSync("git", ["-C", repoDir, "ls-files", "-s", "-z"], { env, encoding: "utf-8", maxBuffer: 512 * 1024 * 1024 });
-    // Fail closed. A listing that could not be read is not evidence that the
-    // repository has no submodules and no filtered paths, and the caller reads
-    // null as "cannot bind this workspace" rather than as a clean tree.
+    // One NUL-terminated index enumeration supplies all three consumers:
+    // ordinary per-path oids, initialized-submodule recursion, and the clean-
+    // filter raw-byte scan. Keeping this walk shared preserves Git path bytes
+    // (including tabs/newlines/non-ASCII) and avoids a second index traversal.
+    const lsFiles = spawnSync("git", ["-C", repoDir, "ls-files", "-s", "-z"], {
+      env,
+      encoding: "utf-8",
+      maxBuffer: 512 * 1024 * 1024,
+    });
     if (lsFiles.status !== 0) return null;
-    const subLines: string[] = [];
-    // The same listing feeds the clean-filter scan below, so binding raw bytes
-    // costs no extra walk of the index.
+
+    const listing: WorkspaceSourceListing = new Map();
+    const submodules: string[] = [];
     const blobPaths: string[] = [];
     for (const record of lsFiles.stdout.split("\0")) {
+      if (record.length === 0) continue;
       const tabIdx = record.indexOf("\t");
-      if (tabIdx === -1) continue;
+      if (tabIdx === -1) return null;
+      const metadata = record.slice(0, tabIdx);
       const entryPath = record.slice(tabIdx + 1);
-      if (!entryPath) continue;
-      if (!record.startsWith("160000 ")) {
-        // Attribute filters apply to regular blobs, not mode-120000 symlinks.
-        // Hashing a symlink path with `hash-object --no-filters` follows its
-        // destination, making external target bytes part of the fingerprint.
-        if (/^100(?:644|755) /.test(record)) blobPaths.push(entryPath);
-        continue;
+      const parsed = /^(\d{6}) ([0-9a-f]{40,64}) (\d+)$/.exec(metadata);
+      if (parsed === null || entryPath.length === 0) return null;
+      const mode = parsed[1];
+      const oid = parsed[2];
+      listing.set(entryPath, oid);
+      if (mode === "160000") {
+        submodules.push(entryPath);
+      } else if (mode === "100644" || mode === "100755") {
+        // Attribute filters apply only to regular blobs, never symlinks/gitlinks.
+        blobPaths.push(entryPath);
       }
-      const subDir = join(repoDir, entryPath);
-      if (!isGitRepoDir(subDir)) continue;
-      // A submodule's own `aidlc/` is the submodule's application source.
-      const subFp = gitTreeFingerprint(subDir, false);
-      if (subFp === null) return null;
-      subLines.push(`${entryPath}=${subFp}`);
     }
+
+    const subLines: string[] = [];
+    for (const entryPath of submodules) {
+      const subDir = join(repoDir, entryPath);
+      // An uninitialized submodule has no materialized source beyond its gitlink.
+      if (!isGitRepoDir(subDir)) continue;
+      // A submodule's own `aidlc/` is application source, not the parent shell.
+      const subState = gitTreeSourceState(subDir, false);
+      if (subState === null) return null;
+      subLines.push(`${entryPath}=${subState.fingerprint}`);
+      for (const [path, oid] of subState.listing) {
+        listing.set(`${entryPath}/${path}`, oid);
+      }
+    }
+
     const raw = cleanFilteredRawLines(repoDir, env, blobPaths);
     if (raw === null) return null;
+    // A lossy clean/process/ident transform must not hide the worktree bytes.
+    // Replace the indexed oid for each affected path with its raw no-filter oid.
+    for (const entry of raw.entries) listing.set(entry.path, entry.sha);
+
     const rawLines = raw.lines;
-    // A repo with neither submodules nor clean-filtered paths keeps returning
-    // the bare tree sha, so the common workspace's fingerprint is unchanged by
-    // this and receipts stamped before it stay comparable.
-    if (subLines.length === 0 && rawLines.length === 0) return sha;
-    subLines.sort();
-    rawLines.sort();
-    // `raw:` prefixes the filtered-content rows so they cannot be confused with
-    // a submodule row whose path and sha happen to line up.
-    return createHash("sha256")
-      .update([sha, ...subLines, ...rawLines].join("\n"))
-      .digest("hex");
+    let fingerprint = treeSha;
+    // Preserve the pre-listing fingerprint VALUE byte-for-byte: the common case
+    // remains the bare tree oid; only initialized submodules/raw-filter paths
+    // fold into the existing sha256 composite, with the same sorted line form.
+    if (subLines.length > 0 || rawLines.length > 0) {
+      subLines.sort();
+      rawLines.sort();
+      fingerprint = createHash("sha256")
+        .update([treeSha, ...subLines, ...rawLines].join("\n"))
+        .digest("hex");
+    }
+    return { fingerprint, listing };
   } finally {
     rmSync(idx, { force: true });
   }
@@ -5672,20 +5675,429 @@ function gitTreeFingerprint(repoDir: string, carriesWorkspaceShell: boolean): st
 // pre-#629 receipt that carries no field at all (#646 review).
 export const UNBINDABLE_FINGERPRINT = "unbindable";
 
-export function workspaceSourceFingerprint(projectDir: string): string | null {
+// Compute the opaque #629 source fingerprint and the #662 canonical per-path
+// listing in one temporary-index pass per repo. Keys are `<repo>\0<path>`;
+// single-repo/Bolt worktrees use an empty repo component.
+export function workspaceSourceState(projectDir: string): WorkspaceSourceState | null {
   const repos = intentRepos(projectDir);
-  // No recorded repos: projectDir IS the checkout (legacy single-repo, or a Bolt
-  // worktree - see aidlc-swarm.ts finalize) and carries the shell at its top.
-  if (repos.length === 0) return gitTreeFingerprint(projectDir, true);
+  if (repos.length === 0) {
+    const state = gitTreeSourceState(projectDir, true);
+    if (state === null) return null;
+    return {
+      fingerprint: state.fingerprint,
+      listing: new Map([...state.listing].map(([path, oid]) => [`\0${path}`, oid])),
+    };
+  }
+
   const lines: string[] = [];
+  const listing: WorkspaceSourceListing = new Map();
   for (const name of [...repos].sort()) {
     // A sibling repo is a child of the roof; the shell is its SIBLING, never
     // nested inside it, so nothing there belongs to the framework.
-    const sha = gitTreeFingerprint(repoDir(projectDir, name), false);
-    if (sha === null) return null;
-    lines.push(`${name}=${sha}`);
+    const state = gitTreeSourceState(repoDir(projectDir, name), false);
+    if (state === null) return null;
+    lines.push(`${name}=${state.fingerprint}`);
+    for (const [path, oid] of state.listing) listing.set(`${name}\0${path}`, oid);
   }
-  return createHash("sha256").update(lines.join("\n")).digest("hex");
+  return {
+    fingerprint: createHash("sha256").update(lines.join("\n")).digest("hex"),
+    listing,
+  };
+}
+
+export function workspaceSourceFingerprint(projectDir: string): string | null {
+  return workspaceSourceState(projectDir)?.fingerprint ?? null;
+}
+
+export function workspaceSourceListing(projectDir: string): WorkspaceSourceListing | null {
+  return workspaceSourceState(projectDir)?.listing ?? null;
+}
+
+export interface UnitSourceManifestWrite {
+  path: string;
+  repo?: string;
+}
+
+export interface UnitSourceManifest {
+  stage: string;
+  unit: string;
+  version: 1;
+  writes: UnitSourceManifestWrite[];
+}
+
+export interface SourceClaimModel {
+  claims: Set<string>;
+  prefixes: string[];
+}
+
+export type ReadUnitSourceManifestResult =
+  | {
+      ok: true;
+      manifest: UnitSourceManifest;
+      claims: Set<string>;
+      prefixes: string[];
+      rawBytesSha256: string;
+    }
+  | { ok: false; reason: string };
+
+function sourceListingFieldEncode(value: string): string {
+  return value
+    .replaceAll("\\", "\\\\")
+    .replaceAll("\t", "\\t")
+    .replaceAll("\n", "\\n")
+    .replaceAll("\r", "\\r");
+}
+
+function sourceListingFieldDecode(value: string): string | null {
+  let decoded = "";
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] !== "\\") {
+      decoded += value[i];
+      continue;
+    }
+    i++;
+    if (i >= value.length) return null;
+    if (value[i] === "\\") decoded += "\\";
+    else if (value[i] === "t") decoded += "\t";
+    else if (value[i] === "n") decoded += "\n";
+    else if (value[i] === "r") decoded += "\r";
+    else return null;
+  }
+  return decoded;
+}
+
+function splitSourcePathKey(key: string): { repo: string; path: string } | null {
+  const separator = key.indexOf("\0");
+  if (separator === -1 || key.indexOf("\0", separator + 1) !== -1) return null;
+  const repo = key.slice(0, separator);
+  const path = key.slice(separator + 1);
+  if (path.length === 0 || (repo.length > 0 && !isValidRepoName(repo))) return null;
+  return { repo, path };
+}
+
+/** Canonical key shared by listings and manifest claims: `<repo>\0<path>`. */
+export function sourcePathKey(repo: string, path: string): string {
+  if (repo.includes("\0") || path.includes("\0")) {
+    throw new Error("Source path keys cannot contain NUL bytes");
+  }
+  return `${repo}\0${path}`;
+}
+
+/**
+ * Stable snapshot representation. Ordinary paths remain readable TSV; the four
+ * characters that can make a TSV row ambiguous are backslash-escaped so Git
+ * paths containing tabs/newlines still round-trip without weakening the NUL-
+ * safe index enumeration that produced them.
+ */
+export function serializeSourceListing(listing: ReadonlyMap<string, string>): string {
+  const rows: Array<{ key: string; line: string }> = [];
+  for (const [key, oid] of listing) {
+    const parsed = splitSourcePathKey(key);
+    if (parsed === null) throw new Error("Invalid canonical source-listing path key");
+    if (!/^[0-9a-f]{40,64}$/.test(oid)) {
+      throw new Error(`Invalid source-listing oid for ${JSON.stringify(parsed.path)}`);
+    }
+    rows.push({
+      key,
+      line: `${sourceListingFieldEncode(parsed.repo)}\t${sourceListingFieldEncode(parsed.path)}\t${oid}`,
+    });
+  }
+  rows.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return rows.length === 0 ? "" : `${rows.map((row) => row.line).join("\n")}\n`;
+}
+
+function parseSourceListing(serialized: string): WorkspaceSourceListing | null {
+  if (serialized === "") return new Map();
+  if (!serialized.endsWith("\n")) return null;
+  const listing: WorkspaceSourceListing = new Map();
+  for (const line of serialized.slice(0, -1).split("\n")) {
+    const firstTab = line.indexOf("\t");
+    const lastTab = line.lastIndexOf("\t");
+    if (firstTab === -1 || firstTab === lastTab) return null;
+    const repo = sourceListingFieldDecode(line.slice(0, firstTab));
+    const path = sourceListingFieldDecode(line.slice(firstTab + 1, lastTab));
+    const oid = line.slice(lastTab + 1);
+    if (
+      repo === null ||
+      path === null ||
+      path.length === 0 ||
+      (repo.length > 0 && !isValidRepoName(repo)) ||
+      !/^[0-9a-f]{40,64}$/.test(oid)
+    ) return null;
+    const key = sourcePathKey(repo, path);
+    if (listing.has(key)) return null;
+    listing.set(key, oid);
+  }
+  return listing;
+}
+
+function sourceListingSha256(serialized: string): string {
+  return createHash("sha256").update(serialized, "utf-8").digest("hex");
+}
+
+function normalizeManifestSourcePath(path: string): { path: string; prefix: boolean } | { reason: string } {
+  if (path.length === 0) return { reason: "writes[].path must be non-empty" };
+  if (path.includes("\0")) return { reason: "writes[].path cannot contain a NUL byte" };
+  if (path.includes("\\")) return { reason: "writes[].path must use POSIX '/' separators, not backslashes" };
+  if (path.startsWith("/") || /^[A-Za-z]:\//.test(path)) {
+    return { reason: "writes[].path must be relative, not absolute" };
+  }
+  if (/[*?\[\]{}]/.test(path)) return { reason: "writes[].path cannot contain glob syntax" };
+  const inputSegments = path.split("/");
+  if (inputSegments.includes("..")) return { reason: "writes[].path cannot contain '..' segments" };
+  const prefix = path.endsWith("/");
+  const segments = inputSegments.filter((segment) => segment !== "" && segment !== ".");
+  if (segments.length === 0) return { reason: "writes[].path must name a path below the repository root" };
+  return { path: `${segments.join("/")}${prefix ? "/" : ""}`, prefix };
+}
+
+function sourcePathIsExcluded(path: string, carriesWorkspaceShell: boolean): boolean {
+  const withoutTrailingSlash = path.replace(/\/+$/, "");
+  if (
+    carriesWorkspaceShell &&
+    (path === "aidlc/" || path === ".aidlc/" || path.startsWith("aidlc/") || path.startsWith(".aidlc/"))
+  ) return true;
+
+  const segments = withoutTrailingSlash.split("/");
+  for (let i = 0; i + 4 < segments.length; i++) {
+    if (segments[i] !== "aidlc" || segments[i + 1] !== "spaces" || segments[i + 3] !== "intents") continue;
+    if (segments[i + 2].length === 0) continue;
+    if (segments.slice(i + 4).includes(".aidlc-sensors")) return true;
+  }
+  return false;
+}
+
+/** Strictly read and validate a unit's engine-required source-manifest.json. */
+export function readUnitSourceManifest(
+  projectDir: string,
+  stageSlug: string,
+  unit: string,
+): ReadUnitSourceManifestResult {
+  if (!/^[a-z][a-z0-9-]*$/.test(stageSlug)) return { ok: false, reason: `invalid stage slug ${JSON.stringify(stageSlug)}` };
+  const unitError = validateUnitName(unit);
+  if (unitError !== null) return { ok: false, reason: unitError };
+  const record = recordDir(projectDir);
+  if (record === null) return { ok: false, reason: "no active intent record resolves" };
+  const manifestPath = join(record, "construction", unit, stageSlug, "source-manifest.json");
+
+  let rawBytes: Buffer;
+  let value: unknown;
+  try {
+    rawBytes = readFileSync(manifestPath);
+  } catch (error) {
+    return { ok: false, reason: `cannot read source-manifest.json (${errorMessage(error)})` };
+  }
+  try {
+    value = JSON.parse(rawBytes.toString("utf-8")) as unknown;
+  } catch (error) {
+    return { ok: false, reason: `source-manifest.json is not valid JSON (${errorMessage(error)})` };
+  }
+  if (!isPlainObject(value)) return { ok: false, reason: "source-manifest.json must contain a JSON object" };
+
+  const allowedTopLevel = new Set(["stage", "unit", "version", "writes"]);
+  const unknownTopLevel = Object.keys(value).filter((key) => !allowedTopLevel.has(key));
+  if (unknownTopLevel.length > 0) {
+    return { ok: false, reason: `source-manifest.json has unknown field(s): ${unknownTopLevel.sort().join(", ")}` };
+  }
+  if (value.stage !== stageSlug) return { ok: false, reason: `stage must equal ${JSON.stringify(stageSlug)}` };
+  if (value.unit !== unit) return { ok: false, reason: `unit must equal ${JSON.stringify(unit)}` };
+  if (value.version !== 1) return { ok: false, reason: "version must equal 1" };
+  if (!Array.isArray(value.writes)) return { ok: false, reason: "writes must be an array" };
+
+  const recordedRepos = intentRepos(projectDir);
+  const recordedRepoSet = new Set(recordedRepos);
+  const carriesWorkspaceShell = recordedRepos.length === 0;
+  const claims = new Set<string>();
+  const prefixes: string[] = [];
+  const seen = new Set<string>();
+  const writes: UnitSourceManifestWrite[] = [];
+
+  for (let index = 0; index < value.writes.length; index++) {
+    const write = value.writes[index];
+    if (!isPlainObject(write)) return { ok: false, reason: `writes[${index}] must be an object` };
+    const allowedWriteFields = new Set(["repo", "path"]);
+    const unknownWriteFields = Object.keys(write).filter((key) => !allowedWriteFields.has(key));
+    if (unknownWriteFields.length > 0) {
+      return { ok: false, reason: `writes[${index}] has unknown field(s): ${unknownWriteFields.sort().join(", ")}` };
+    }
+    if (typeof write.path !== "string") return { ok: false, reason: `writes[${index}].path must be a string` };
+    if ("repo" in write && typeof write.repo !== "string") {
+      return { ok: false, reason: `writes[${index}].repo must be a string when present` };
+    }
+
+    const declaredRepo = typeof write.repo === "string" ? write.repo : undefined;
+    let canonicalRepo = declaredRepo;
+    if (canonicalRepo !== undefined) {
+      if (!isValidRepoName(canonicalRepo)) return { ok: false, reason: `writes[${index}].repo is not a valid recorded-repo name` };
+      if (!recordedRepoSet.has(canonicalRepo)) return { ok: false, reason: `writes[${index}].repo ${JSON.stringify(canonicalRepo)} is not recorded for this intent` };
+    } else if (recordedRepos.length > 1) {
+      return { ok: false, reason: `writes[${index}].repo is required for a multi-repo intent` };
+    } else if (recordedRepos.length === 1) {
+      canonicalRepo = recordedRepos[0];
+    }
+
+    const normalized = normalizeManifestSourcePath(write.path);
+    if ("reason" in normalized) return { ok: false, reason: `writes[${index}].path: ${normalized.reason}` };
+    if (sourcePathIsExcluded(normalized.path, carriesWorkspaceShell)) {
+      return { ok: false, reason: `writes[${index}].path is inside the framework record/shell exclusions` };
+    }
+    const key = sourcePathKey(canonicalRepo ?? "", normalized.path);
+    if (seen.has(key)) return { ok: false, reason: `writes[${index}] duplicates a normalized source claim` };
+    seen.add(key);
+    if (normalized.prefix) prefixes.push(key);
+    else claims.add(key);
+    writes.push({ ...(declaredRepo === undefined ? {} : { repo: declaredRepo }), path: normalized.path });
+  }
+
+  prefixes.sort();
+  return {
+    ok: true,
+    manifest: { stage: stageSlug, unit, version: 1, writes },
+    claims,
+    prefixes,
+    rawBytesSha256: createHash("sha256").update(rawBytes).digest("hex"),
+  };
+}
+
+/** True when a canonical path is claimed exactly or by a directory prefix. */
+export function sourceClaimCovers(pathKey: string, claimModel: SourceClaimModel): boolean {
+  if (claimModel.claims.has(pathKey)) return true;
+  return claimModel.prefixes.some((prefix) => pathKey.startsWith(prefix));
+}
+
+/** Expand exact/directory claims against one current source listing. */
+export function restrictSourceListing(
+  listing: ReadonlyMap<string, string>,
+  claimModel: SourceClaimModel,
+): WorkspaceSourceListing {
+  const restricted: WorkspaceSourceListing = new Map();
+  for (const [key, oid] of listing) {
+    if (sourceClaimCovers(key, claimModel)) restricted.set(key, oid);
+  }
+  return restricted;
+}
+
+function serializeUnitSourceListing(
+  listing: ReadonlyMap<string, string>,
+  claimModel: SourceClaimModel,
+  manifestSha256: string,
+): string {
+  if (!/^[0-9a-f]{64}$/.test(manifestSha256)) throw new Error("Invalid source-manifest sha256");
+  return `manifest\t${manifestSha256}\t-\n${serializeSourceListing(restrictSourceListing(listing, claimModel))}`;
+}
+
+/** Audit-field value binding manifest bytes plus every currently claimed path. */
+export function unitSourceFingerprint(
+  listing: ReadonlyMap<string, string>,
+  claimModel: SourceClaimModel,
+  manifestSha256: string,
+): string {
+  return `sha256:${sourceListingSha256(serializeUnitSourceListing(listing, claimModel, manifestSha256))}`;
+}
+
+function validSourceSnapshotFingerprint(fingerprint: string): string | null {
+  const matched = /^sha256:([0-9a-f]{64})$/.exec(fingerprint);
+  return matched?.[1] ?? null;
+}
+
+function sourceSnapshotDir(projectDir: string, stageSlug: string): string | null {
+  if (!/^[a-z][a-z0-9-]*$/.test(stageSlug)) return null;
+  const record = recordDir(projectDir);
+  return record === null ? null : join(record, ".aidlc-source-review", stageSlug);
+}
+
+function writeSourceSnapshot(path: string, serialized: string): string {
+  const hash = sourceListingSha256(serialized);
+  mkdirSync(dirname(path), { recursive: true });
+  if (existsSync(path)) {
+    const existing = readFileSync(path);
+    if (existing.equals(Buffer.from(serialized, "utf-8"))) return `sha256:${hash}`;
+    // A different payload at the same 12-hex address is either corruption or
+    // a prefix collision. Never destroy evidence already referenced by audit.
+    throw new Error(`Source snapshot address collision or corruption at ${path}`);
+  }
+  writeFileAtomic(path, serialized);
+  return `sha256:${hash}`;
+}
+
+/** Write a content-addressed stage-entry baseline listing snapshot. */
+export function writeBaselineSourceSnapshot(
+  projectDir: string,
+  stageSlug: string,
+  listing: ReadonlyMap<string, string>,
+): string {
+  const dir = sourceSnapshotDir(projectDir, stageSlug);
+  if (dir === null) throw new Error("Cannot write source baseline without a valid active record and stage slug");
+  const serialized = serializeSourceListing(listing);
+  const hash = sourceListingSha256(serialized);
+  return writeSourceSnapshot(join(dir, `baseline-${hash.slice(0, 12)}.tsv`), serialized);
+}
+
+/** Write a content-addressed unit listing snapshot including its manifest header. */
+export function writeUnitSourceSnapshot(
+  projectDir: string,
+  stageSlug: string,
+  unit: string,
+  listing: ReadonlyMap<string, string>,
+  claimModel: SourceClaimModel,
+  manifestSha256: string,
+): string {
+  const dir = sourceSnapshotDir(projectDir, stageSlug);
+  const unitError = validateUnitName(unit);
+  if (dir === null || unitError !== null) throw new Error("Cannot write unit source snapshot without a valid active record, stage slug, and unit");
+  const serialized = serializeUnitSourceListing(listing, claimModel, manifestSha256);
+  const hash = sourceListingSha256(serialized);
+  return writeSourceSnapshot(join(dir, `unit-${unit}-${hash.slice(0, 12)}.tsv`), serialized);
+}
+
+function readSourceSnapshot(path: string, fingerprint: string): string | null {
+  const expected = validSourceSnapshotFingerprint(fingerprint);
+  if (expected === null) return null;
+  try {
+    const bytes = readFileSync(path);
+    if (createHash("sha256").update(bytes).digest("hex") !== expected) return null;
+    return bytes.toString("utf-8");
+  } catch {
+    return null;
+  }
+}
+
+/** Read a baseline only after exact verification against the full audit hash. */
+export function readBaselineSourceSnapshot(
+  projectDir: string,
+  stageSlug: string,
+  fingerprint: string,
+): WorkspaceSourceListing | null {
+  const dir = sourceSnapshotDir(projectDir, stageSlug);
+  const hash = validSourceSnapshotFingerprint(fingerprint);
+  if (dir === null || hash === null) return null;
+  const serialized = readSourceSnapshot(join(dir, `baseline-${hash.slice(0, 12)}.tsv`), fingerprint);
+  return serialized === null ? null : parseSourceListing(serialized);
+}
+
+export interface UnitSourceSnapshot {
+  listing: WorkspaceSourceListing;
+  manifestSha256: string;
+}
+
+/** Read a unit snapshot only after full-hash verification and strict parsing. */
+export function readUnitSourceSnapshot(
+  projectDir: string,
+  stageSlug: string,
+  unit: string,
+  fingerprint: string,
+): UnitSourceSnapshot | null {
+  const dir = sourceSnapshotDir(projectDir, stageSlug);
+  const hash = validSourceSnapshotFingerprint(fingerprint);
+  if (dir === null || hash === null || validateUnitName(unit) !== null) return null;
+  const serialized = readSourceSnapshot(join(dir, `unit-${unit}-${hash.slice(0, 12)}.tsv`), fingerprint);
+  if (serialized === null) return null;
+  const newline = serialized.indexOf("\n");
+  if (newline === -1) return null;
+  const header = /^manifest\t([0-9a-f]{64})\t-$/.exec(serialized.slice(0, newline));
+  if (header === null) return null;
+  const listing = parseSourceListing(serialized.slice(newline + 1));
+  return listing === null ? null : { listing, manifestSha256: header[1] };
 }
 
 
