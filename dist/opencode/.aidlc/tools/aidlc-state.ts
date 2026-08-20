@@ -3197,6 +3197,9 @@ function handleSkip(args: string[]): void {
         emitAudit(pd, "STAGE_STARTED", {
           Stage: nextStage.slug,
           Agent: nextStage.lead_agent,
+          ...(nextStage.workspace_requires
+            ? sourceBaselineFields(pd, nextStage.slug)
+            : {}),
         });
       }
     } else {
