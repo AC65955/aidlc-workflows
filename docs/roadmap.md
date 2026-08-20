@@ -127,9 +127,11 @@ but do not yet have committed release versions.
   ([#646](https://github.com/awslabs/aidlc-workflows/pull/646)), and propagate
   stale stage results
   ([#716](https://github.com/awslabs/aidlc-workflows/pull/716)).
-- Define per-unit attribution for Code Generation review receipts
-  ([#662](https://github.com/awslabs/aidlc-workflows/issues/662)) and a fresh v2
-  implementation for cross-unit discovery propagation
+- ~~Define per-unit attribution for Code Generation review receipts
+  ([#662](https://github.com/awslabs/aidlc-workflows/issues/662)).~~ Delivered in
+  2.6.20 with source manifests, per-unit bindings, baselines, and swarm footprint
+  verification. A fresh v2 implementation for cross-unit discovery propagation
+  remains planned
   ([#299](https://github.com/awslabs/aidlc-workflows/issues/299)/[#300](https://github.com/awslabs/aidlc-workflows/pull/300)).
 - Preserve progressive enrichment as the North Star destination: downstream
   stages enrich upstream artefacts in place, with ADRs as a core design artefact.

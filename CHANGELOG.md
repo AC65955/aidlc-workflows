@@ -1,6 +1,16 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [2.6.20] - 2026-08-20
+
+Code-generation review receipts now attribute reviewed application source per Unit and fail closed when changed source is unclaimed. **Upgrade:** refresh your `dist/<harness>/` shell. In-flight Code Generation runs retain migration-compatible behavior until their next per-unit review; that review must write `construction/<unit>/code-generation/source-manifest.json` before its terminal verdict.
+
+* `aidlc-log.ts review --verdict` refuses a terminal per-unit Code Generation receipt when its strict source manifest is missing or invalid. Successful receipts record `Unit Source Fingerprint`; an explicit `AIDLC_SKIP_SOURCE_FRESHNESS=1` bypass records `Unit Source Binding Bypass: true` instead of silently becoming legacy evidence.
+* Completion validates modern receipts newest-first, invalidates only Units whose exact/directory claims changed, and lets a newer fresh claimant own intentional shared-file integration. Invalidated Units use the existing one bounded stale-receipt recovery and must stop editing declared artifacts, manifest bytes, and claimed source paths afterward.
+* Workflow/jump/stage-entry baselines make additions, modifications, and deletions outside the fresh reviewed claims union refuse with the RFC #662 unclaimed-source error. Unit-major construction anchors to the workflow/jump boundary, destroyed evidence fails closed, and cross-shard chronology ambiguity never delegates authority to filename order.
+* Autonomous swarm finalize attests the immutable base commit, validates the worktree-scoped unit fingerprint and manifest bytes, and refuses a base-to-worktree footprint outside reviewed claims before retaining the immutable reviewed-source commit.
+* The source-freshness off-switch covers global binding, per-unit attribution, baselines, and swarm footprint verification. Pre-upgrade fieldless receipts, missing baselines, and worktrees without a recorded base commit retain the documented migration fail-open; present but unbindable, corrupt, or bypass-marked modern evidence fails closed without the switch.
+
 ## [2.6.19] - 2026-08-19
 
 Code-generation review receipts are now bound to the workspace source state the reviewer inspected, and every completion route refuses when that state is stale. The same binding follows autonomous swarm work from finalize through source merge. **Upgrade:** refresh your `dist/<harness>/` shell so the source-fingerprint tools, guards, audit schema, and generated harness files are installed.

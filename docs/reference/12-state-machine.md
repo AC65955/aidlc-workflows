@@ -175,23 +175,35 @@ convergence ledger is the evidence); `report --single` checks stage-level
 evidence only. Bypass with `AIDLC_DISABLE_ENSEMBLE_EVIDENCE=1`, intended only
 for recovering a legitimately-run stage whose contribution files were lost.
 
-**Source-freshness binding (#629/#646).** On a `workspace_requires` stage, each
-terminal review receipt carries a `Source Fingerprint` for the source tree the
-reviewer inspected. `approve`, `advance`, `finalize`, and `complete-workflow`
-reconcile the chronologically newest modern binding against the current tree.
-A mismatch invalidates the collected receipts as one workspace-global set and
-enters the same bounded `stale-receipt` recovery flow as a post-review artifact
-write: one recovery request/verdict is available even after the ordinary
-iteration budget is exhausted. Reverting the edit also restores the binding
-because it is content-addressed. Already-`[x]` recovery skips receipt
-existence/cardinality only; a recorded modern binding is still compared.
+**Source freshness and per-unit attribution (#629/#646/#662).** On a
+`workspace_requires` stage, every terminal review still carries the workspace-
+global `Source Fingerprint`; the newest modern binding remains the outer
+post-review-mutation boundary on all four completion routes. Per-unit receipts
+add `Unit Source Fingerprint`, which binds the raw bytes of the unit's strict
+`source-manifest.json` and the current content of every exact/directory claim.
+Receipts are evaluated newest-first, so a newer validated claimant may shield
+an older receipt for an intentional shared path. An uncovered edit, deletion,
+or new path in an exact/directory claim invalidates only the owning unit and
+enters that unit's one bounded `stale-receipt` recovery.
 
-The workspace-global hash proves that the current source equals the tree seen by
-the newest review; it does **not** prove per-unit attribution. Source changed
-before that newest review can be revalidated by one later unit receipt. That
-explicit policy is the accepted limitation until RFC #662 adds a machine-readable
-per-unit source-path manifest. New `unbindable` receipts fail closed; only
-pre-#629 receipts with no field retain migration behavior.
+`WORKFLOW_STARTED`, `STAGE_JUMPED`, and a `workspace_requires`
+`STAGE_STARTED` record content-addressed source-listing baselines. After every
+applicable unit has fresh modern evidence, completion compares baseline to the
+current listing and refuses any changed application-source path outside the
+fresh claims union. Unit-major Construction always uses the workflow/jump
+boundary because source work can precede its late `STAGE_STARTED`. Equal-second
+cross-shard rows that would decide a boundary or newest claimant fail closed
+instead of trusting shard filename order.
+
+Migration is deliberate: a pre-upgrade workflow with no baseline skips the
+unclaimed check, and a fieldless per-unit receipt retains the #629 global
+policy. A present but `unbindable`, missing, or corrupt modern baseline/unit
+snapshot fails closed. `AIDLC_SKIP_SOURCE_FRESHNESS=1` bypasses both global and
+per-unit checks; missing/invalid-manifest receipts explicitly record
+`Unit Source Binding Bypass: true`, so the switch must be present again at
+completion. In a modern Bolt, finalize also verifies the attested base-to-
+worktree footprint is a subset of the reviewed manifest claims before the
+settled-swarm stage-level exemption applies.
 `AIDLC_SKIP_SOURCE_FRESHNESS=1` disables the check. Swarm finalization records an
 immutable reviewed `Source Commit`; a bypassed finalize records
 `Source Freshness Bypass: true`, and merge must repeat the same switch.
@@ -294,7 +306,7 @@ Session hooks check for the active intent's `aidlc-state.md` (under `aidlc/space
 | `QUESTION_ANSWERED` | `tools/aidlc-log.ts` | Fires after a non-gate question response; approval choices are lifecycle events owned by `report` |
 | `SUMMARY_CONFIRMATION_RECORDED` | `tools/aidlc-log.ts` | Human-backed consolidated-summary receipt; bound to the questions-file digest and reserved from public audit append |
 | `REVIEW_REQUESTED` | `tools/aidlc-log.ts` | Fires when the conductor dispatches the reviewer defined by `stage-protocol-reviewer.md` §12a |
-| `REVIEW_COMPLETED` | `tools/aidlc-log.ts` | Fires only after a matching positive-iteration `REVIEW_REQUESTED` and records an `Artifact Fingerprint` over the declared output paths and bytes. `READY` is terminal immediately; advisory `NOT-READY` is terminal after its normal-flow pass; adversarial `NOT-READY` is terminal only at `reviewer_max_iterations` (earlier rows expose repair/retry progress to a wave). A terminal receipt invalidated by a later declared-output or source write gets one distinct recovery request at the next ordinal; either recovery verdict is terminal, and a second invalidation requires human reset. `workspace_requires` stages also record `Source Fingerprint` (a git-native source hash, or `unbindable`); modern unbindable receipts fail closed, while fieldless pre-#629 rows retain migration behavior. All four completion routes enforce current-attempt artifact evidence and the newest source binding. |
+| `REVIEW_COMPLETED` | `tools/aidlc-log.ts` | Fires only after a matching positive-iteration `REVIEW_REQUESTED` and records an `Artifact Fingerprint`. `workspace_requires` receipts also bind source globally; per-unit receipts require `source-manifest.json` and record `Unit Source Fingerprint` (or an explicit bypass marker). Terminal ordering, stale recovery, and review-class semantics apply to declared artifacts, manifest bytes, and claimed source paths. |
 
 ### Unit lifecycle (inline per-unit Construction stages)
 
@@ -459,7 +471,7 @@ Pre-registered for v0.6.0 in milestone 2. All six swarm events now emit from the
 | Event | Emitter | Trigger |
 |---|---|---|
 | `SWARM_STARTED` | `tools/aidlc-swarm.ts` | Swarm referee `prepare` captured the exact attempt and forked a batch of dependency-linked Units |
-| `SWARM_UNIT_CONVERGED` | `tools/aidlc-swarm.ts` | A swarm Unit re-verified green and untampered, with its configured post-Bolt reviewer receipt present, then merged AIDLC metadata back. For a source-bound stage it records the validated `Source Fingerprint` and immutable `Source Commit`; the later source merge rechecks and consumes that exact object rather than the movable Bolt branch. A bypass row is explicit and requires `AIDLC_SKIP_SOURCE_FRESHNESS=1` again at merge. |
+| `SWARM_UNIT_CONVERGED` | `tools/aidlc-swarm.ts` | A swarm Unit re-verified green and untampered, with its configured post-Bolt reviewer receipt and Unit Source Fingerprint current, and its attested base-to-worktree footprint contained by reviewed manifest claims. It then merges AIDLC metadata back and records the validated `Source Fingerprint` plus immutable `Source Commit`; bypass rows remain explicit and require the switch again at source merge. |
 | `SWARM_UNIT_FAILED` | `tools/aidlc-swarm.ts` | A swarm Unit failed the `finalize` re-verify (not claimed, claimed-but-red, tampered, or missing its configured reviewer receipt) |
 | `SWARM_BATON_RETURNED` | `tools/aidlc-swarm.ts` | A swarm Unit returned the baton to the conductor for orchestrator-mediated coordination |
 | `SWARM_COMPLETED` | `tools/aidlc-swarm.ts` | All Units in the batch finished (converged or failed); batch closed |

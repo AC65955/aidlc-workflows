@@ -155,6 +155,26 @@ sequenceDiagram
 
 ---
 
+### Source-bound review receipts
+
+Code Generation writes application source outside the intent record, so its
+terminal per-unit review receipt binds more than markdown artifacts. The
+reviewed unit's strict `source-manifest.json` lists created, modified, or deleted
+source paths; `Unit Source Fingerprint` binds those claims and manifest bytes.
+At completion the engine validates each unit newest-first (a newer reviewed
+claim can own an intentional shared-file integration), then compares the union
+of fresh claims with the stage-entry source baseline. An uncovered change or a
+stale unit blocks all four completion routes and offers that unit's one bounded
+stale-receipt recovery.
+
+The workspace-global `Source Fingerprint` remains an outer post-review mutation
+boundary. Pre-upgrade fieldless receipts/baselines retain documented migration
+fail-open behavior; missing or corrupt modern evidence fails closed.
+`AIDLC_SKIP_SOURCE_FRESHNESS=1` is the deterministic emergency off-switch and
+must be present again when consuming a bypass-marked receipt.
+
+---
+
 ## How State and Audit Work Together
 
 The state file and audit trail serve complementary purposes:
