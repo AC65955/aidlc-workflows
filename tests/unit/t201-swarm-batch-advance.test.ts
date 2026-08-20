@@ -57,7 +57,6 @@ import {
   seedBoltDagBatches,
   seededAuditDir,
   seededAuditShard,
-  seededRecordDir,
   seededStateFile,
 } from "../harness/fixtures.ts";
 
