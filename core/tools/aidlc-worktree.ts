@@ -25,6 +25,7 @@ import {
   gitCommitSourceListing,
   parseSourceListing,
   readAllAuditShards,
+  readAuditShardEvents,
   reviewedSourceRefPrefix,
   resolveBoltDag,
   resolveConstructionRepo,
@@ -404,14 +405,46 @@ function convergedSourceRecord(
   space?: string,
 ): ConvergedSourceRecord | null {
   let latestBlock: string | undefined;
+  const unitName = convergedUnitName(pd, slug);
+  let rows: ReturnType<typeof readAuditShardEvents>;
   try {
-    const unitName = convergedUnitName(pd, slug);
-    for (const e of findAllEvents(readAllAuditShards(pd, intent, space), "SWARM_UNIT_CONVERGED")) {
-      if (auditBlockField(e.block, "Unit name") !== unitName) continue;
-      latestBlock = e.block;
-    }
+    rows = readAuditShardEvents(pd, intent, space)
+      .filter(
+        (row) =>
+          row.event === "SWARM_UNIT_CONVERGED" &&
+          auditBlockField(row.block, "Unit name") === unitName,
+      )
+      .sort((a, b) => {
+        if (a.timestamp !== b.timestamp) return a.timestamp < b.timestamp ? -1 : 1;
+        if (a.shard === b.shard) return a.pos - b.pos;
+        return a.shard < b.shard ? -1 : 1;
+      });
   } catch {
     return null; // unreadable audit is not evidence of a source-bound convergence
+  }
+  if (rows.length > 0) {
+    const latestTimestamp = rows[rows.length - 1].timestamp;
+    const latest = rows.filter((row) => row.timestamp === latestTimestamp);
+    if (new Set(latest.map((row) => row.shard)).size > 1) {
+      const identities = new Set(
+        latest.map((row) =>
+          [
+            auditBlockField(row.block, "Stage") ?? "",
+            auditBlockField(row.block, "Run floor") ?? "",
+            auditBlockField(row.block, "Source Fingerprint") ?? "",
+            auditBlockField(row.block, "Source Commit") ?? "",
+            auditBlockField(row.block, "Source Freshness Bypass") ?? "",
+          ].join("\0"),
+        ),
+      );
+      if (identities.size !== 1) {
+        errorWithSlug(
+          slug,
+          `refusing to merge: same-second cross-shard convergence authority is ambiguous; rerun finalize in the current attempt`,
+        );
+      }
+    }
+    latestBlock = latest[0].block;
   }
   const bypass = latestBlock
     ? auditBlockField(latestBlock, "Source Freshness Bypass") ?? undefined

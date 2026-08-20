@@ -349,7 +349,8 @@ function reviewerReceiptError(
     .filter(
       (row) =>
         row.event === "WORKTREE_CREATED" &&
-        auditBlockField(row.block, "Bolt slug") === boltSlug,
+        auditBlockField(row.block, "Bolt slug") === boltSlug &&
+        auditBlockField(row.block, "Worktree path") === wt,
     )
     .sort((a, b) => {
       if (a.timestamp !== b.timestamp) return a.timestamp < b.timestamp ? -1 : 1;

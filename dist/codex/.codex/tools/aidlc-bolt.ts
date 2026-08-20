@@ -184,11 +184,13 @@ function latestWorktreeCreationFields(
   projectDir: string,
   slug: string,
 ): { modern: boolean; baseCommit: string | null; baseSourceListing: string | null } | null {
+  const currentWorktreePath = worktreePath(projectDir, slug);
   const rows = readAuditShardEvents(projectDir)
     .filter(
       (row) =>
         row.event === "WORKTREE_CREATED" &&
-        auditBlockField(row.block, "Bolt slug") === slug,
+        auditBlockField(row.block, "Bolt slug") === slug &&
+        auditBlockField(row.block, "Worktree path") === currentWorktreePath,
     )
     .sort((a, b) => {
       if (a.timestamp !== b.timestamp) return a.timestamp < b.timestamp ? -1 : 1;
