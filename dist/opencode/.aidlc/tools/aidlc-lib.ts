@@ -6054,7 +6054,7 @@ function normalizeManifestSourcePath(path: string): { path: string; prefix: bool
   if (path.startsWith("/") || /^[A-Za-z]:\//.test(path)) {
     return { reason: "writes[].path must be relative, not absolute" };
   }
-  if (/[*?\[\]{}]/.test(path)) return { reason: "writes[].path cannot contain glob syntax" };
+  if (/[*?[\]{}]/.test(path)) return { reason: "writes[].path cannot contain glob syntax" };
   const inputSegments = path.split("/");
   if (inputSegments.includes("..")) return { reason: "writes[].path cannot contain '..' segments" };
   const prefix = path.endsWith("/");

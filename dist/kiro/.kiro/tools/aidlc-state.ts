@@ -2038,7 +2038,6 @@ function verifyReviewerPrecondition(
     receipts.sourceBaseline.state === "ready" &&
     receipts.currentSourceListing !== null
   ) {
-    const changed = baselineChanged ?? new Set<string>();
     const unclaimed = baselineUnclaimed ?? [];
     if (unclaimed.length > 0) {
       const rendered = unclaimed.slice(0, 10).map((key) => {
