@@ -4763,6 +4763,12 @@ export interface StaleReviewProgress {
   recoverySpent: boolean;
 }
 
+export type SourceBaselineResult =
+  | { state: "legacy" }
+  | { state: "unbindable" }
+  | { state: "invalid" }
+  | { state: "ready"; listing: WorkspaceSourceListing };
+
 export interface FreshReviewReceipts {
   /** Verdict of the last fresh terminal receipt for the stage (any receipt,
    *  unit-scoped included), or null when none survives. For NON-per-unit
@@ -4794,6 +4800,12 @@ export interface FreshReviewReceipts {
   sourceRecoverySpent: boolean;
   /** Units whose terminal receipt was invalidated in the current attempt. */
   unitStale: Set<string>;
+  /** Validated modern claim model for every unit whose receipt remains fresh. */
+  freshUnitClaims: Map<string, SourceClaimModel>;
+  /** Effective stage-entry source baseline for unclaimed-path verification. */
+  sourceBaseline: SourceBaselineResult;
+  /** Current source listing from the guard's single workspace walk, when needed. */
+  currentSourceListing: WorkspaceSourceListing | null;
   /** Next request ordinal and recovery availability for a stale stage receipt. */
   stageStaleProgress: StaleReviewProgress | null;
   /** Next request ordinal and recovery availability for stale unit receipts. */
@@ -5008,6 +5020,9 @@ export function freshReviewReceipts(
     sourceStaleProgress: null,
     sourceRecoverySpent: false,
     unitStale: new Set(),
+    freshUnitClaims: new Map(),
+    sourceBaseline: { state: "legacy" },
+    currentSourceListing: null,
     stageStaleProgress: null,
     unitStaleProgress: new Map(),
     stageIteration: null,
@@ -5078,6 +5093,16 @@ export function freshReviewReceipts(
     string,
     { unit: string | undefined; iteration: number; recovery: boolean }
   >();
+  const modernUnitReceipts = new Map<
+    string,
+    {
+      fingerprint: string | null;
+      bypass: boolean;
+      order: number;
+      iteration: number;
+      recovery: boolean;
+    }
+  >();
   let stageVerdict: ReviewVerdict | null = null;
   let newestSourceFingerprint: string | null = null;
   let newestSourceUnit: string | null = null;
@@ -5117,6 +5142,7 @@ export function freshReviewReceipts(
         unitVerdicts.clear();
         unitIterations.clear();
         unitReceiptRecovery.clear();
+        modernUnitReceipts.clear();
       } else {
         if (unitVerdicts.delete(targetUnit)) {
           unitStale.add(targetUnit);
@@ -5127,6 +5153,7 @@ export function freshReviewReceipts(
         }
         unitIterations.delete(targetUnit);
         unitReceiptRecovery.delete(targetUnit);
+        modernUnitReceipts.delete(targetUnit);
       }
       continue;
     }
@@ -5242,6 +5269,13 @@ export function freshReviewReceipts(
       unitIterations.set(unit, iteration);
       unitReceiptRecovery.set(unit, request.recovery);
       unitPending.delete(unit);
+      modernUnitReceipts.set(unit, {
+        fingerprint: auditBlockField(e.block, "Unit Source Fingerprint"),
+        bypass: auditBlockField(e.block, "Unit Source Binding Bypass") === "true",
+        order: i,
+        iteration,
+        recovery: request.recovery,
+      });
     } else {
       stageStale = false;
       stageStaleProgress = null;
@@ -5263,15 +5297,142 @@ export function freshReviewReceipts(
     }
   }
 
-  const currentSourceFingerprint =
-    stage.workspace_requires === true && newestSourceFingerprint !== null
-      ? workspaceSourceFingerprint(projectDir)
-      : null;
+  const sourceFreshnessApplies =
+    stage.workspace_requires === true &&
+    process.env.AIDLC_SKIP_SOURCE_FRESHNESS !== "1";
+  const needsCurrentSource =
+    stage.workspace_requires === true &&
+    (newestSourceFingerprint !== null || modernUnitReceipts.size > 0);
+  // One shared temp-index pass supplies BOTH global reconciliation and every
+  // per-unit comparison. Never recompute inside the unit loop.
+  const currentSourceState = needsCurrentSource
+    ? workspaceSourceState(projectDir)
+    : null;
+  const currentSourceFingerprint = currentSourceState?.fingerprint ?? null;
+  const currentSourceListing = currentSourceState?.listing ?? null;
   const sourceStale =
     newestSourceFingerprint !== null &&
     (newestSourceFingerprint === UNBINDABLE_FINGERPRINT ||
       currentSourceFingerprint === null ||
       currentSourceFingerprint !== newestSourceFingerprint);
+
+  const freshUnitClaims = new Map<string, SourceClaimModel>();
+  if (sourceFreshnessApplies && currentSourceListing !== null) {
+    const newerFreshClaims: SourceClaimModel[] = [];
+    const receiptsNewestFirst = [...modernUnitReceipts.entries()]
+      .filter(([unit]) => unitVerdicts.has(unit))
+      .sort((a, b) => b[1].order - a[1].order);
+    for (const [unit, receipt] of receiptsNewestFirst) {
+      // No modern binding marker at all is migration evidence: keep the #629
+      // global policy for this unit and do not invent claims from current bytes.
+      if (receipt.fingerprint === null && !receipt.bypass) continue;
+      let stale = receipt.bypass;
+      let claimModel: SourceClaimModel | null = null;
+      let reviewedListing: WorkspaceSourceListing | null = null;
+      if (!stale && receipt.fingerprint === UNBINDABLE_FINGERPRINT) stale = true;
+      if (!stale && receipt.fingerprint !== null) {
+        const snapshot = readUnitSourceSnapshot(
+          projectDir,
+          stage.slug,
+          unit,
+          receipt.fingerprint,
+        );
+        const manifest = readUnitSourceManifest(projectDir, stage.slug, unit);
+        if (snapshot === null || !manifest.ok || snapshot.manifestSha256 !== manifest.rawBytesSha256) {
+          stale = true;
+        } else {
+          claimModel = { claims: manifest.claims, prefixes: manifest.prefixes };
+          reviewedListing = snapshot.listing;
+          for (const [pathKey, reviewedOid] of reviewedListing) {
+            if (newerFreshClaims.some((claims) => sourceClaimCovers(pathKey, claims))) continue;
+            if (currentSourceListing.get(pathKey) !== reviewedOid) {
+              stale = true;
+              break;
+            }
+          }
+          if (!stale) {
+            // A directory prefix binds future additions too: anything currently
+            // inside it but absent from the reviewed snapshot needs a newer
+            // validated claimant or invalidates this receipt.
+            for (const [pathKey] of currentSourceListing) {
+              if (!manifest.prefixes.some((prefix) => pathKey.startsWith(prefix))) continue;
+              if (reviewedListing.has(pathKey)) continue;
+              if (newerFreshClaims.some((claims) => sourceClaimCovers(pathKey, claims))) continue;
+              stale = true;
+              break;
+            }
+          }
+        }
+      }
+      if (stale) {
+        unitVerdicts.delete(unit);
+        unitStale.add(unit);
+        unitStaleProgress.set(unit, {
+          nextIteration: receipt.iteration + 1,
+          recoverySpent: receipt.recovery,
+        });
+        continue;
+      }
+      if (claimModel !== null) {
+        freshUnitClaims.set(unit, claimModel);
+        newerFreshClaims.push(claimModel);
+      }
+    }
+  } else if (sourceFreshnessApplies && modernUnitReceipts.size > 0) {
+    for (const [unit, receipt] of modernUnitReceipts) {
+      if (!unitVerdicts.has(unit)) continue;
+      if (receipt.fingerprint === null && !receipt.bypass) continue;
+      unitVerdicts.delete(unit);
+      unitStale.add(unit);
+      unitStaleProgress.set(unit, {
+        nextIteration: receipt.iteration + 1,
+        recoverySpent: receipt.recovery,
+      });
+    }
+  }
+
+  // Anchor the unclaimed-path baseline to the stage's real entry. A late
+  // unit-major STAGE_STARTED is ignored because first work evidence already
+  // precedes it; GATE_REJECTED never re-anchors cumulative manifests.
+  let sourceBaseline: SourceBaselineResult = { state: "legacy" };
+  if (stage.workspace_requires === true) {
+    let boundary = -1;
+    for (let i = 0; i < events.length; i++) {
+      if (events[i].event === "WORKFLOW_STARTED" || events[i].event === "STAGE_JUMPED") boundary = i;
+    }
+    let firstWork = events.length;
+    for (let i = Math.max(boundary, 0); i < events.length; i++) {
+      const event = events[i];
+      if (auditBlockField(event.block, "Stage") !== stage.slug) continue;
+      if (event.event === "REVIEW_REQUESTED") {
+        firstWork = i;
+        break;
+      }
+      if (event.event === "ARTIFACT_CREATED" || event.event === "ARTIFACT_UPDATED") {
+        const file = auditBlockField(event.block, "File");
+        if (file && producesArtifactUnit(stage, file, recordedRepos) !== undefined) {
+          firstWork = i;
+          break;
+        }
+      }
+    }
+    let baselineField: string | null = null;
+    for (let i = Math.max(boundary, 0); i < firstWork; i++) {
+      const event = events[i];
+      if (
+        event.event !== "WORKFLOW_STARTED" &&
+        event.event !== "STAGE_JUMPED" &&
+        event.event !== "STAGE_STARTED"
+      ) continue;
+      const field = auditBlockField(event.block, "Source Baseline");
+      if (field !== null) baselineField = field;
+    }
+    if (baselineField === UNBINDABLE_FINGERPRINT) sourceBaseline = { state: "unbindable" };
+    else if (baselineField !== null) {
+      const listing = readBaselineSourceSnapshot(projectDir, stage.slug, baselineField);
+      sourceBaseline = listing === null ? { state: "invalid" } : { state: "ready", listing };
+    }
+  }
 
   return {
     stageVerdict,
@@ -5290,6 +5451,9 @@ export function freshReviewReceipts(
       : null,
     sourceRecoverySpent,
     unitStale,
+    freshUnitClaims,
+    sourceBaseline,
+    currentSourceListing: sourceFreshnessApplies ? currentSourceListing : null,
     stageStaleProgress,
     unitStaleProgress,
     stageIteration,

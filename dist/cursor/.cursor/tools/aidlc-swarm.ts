@@ -93,6 +93,7 @@ import {
   parseArgs,
   readAuditShardEvents,
   readAllAuditShards,
+  readUnitSourceManifest,
   readStateFile,
   relativeRecordDir,
   reviewArtifactFingerprint,
@@ -102,6 +103,7 @@ import {
   resolveProjectDir,
   resolveStage,
   terminalReviewVerdict,
+  sourceClaimCovers,
   UNBINDABLE_FINGERPRINT,
   validateUnitName,
   worktreeAuditFilePath,
@@ -380,6 +382,24 @@ function reviewerReceiptError(
     };
   }
 
+  const boltStartBlock = events[boltStart].block;
+  const baseCommit = auditBlockField(boltStartBlock, "Base commit");
+  if (baseCommit !== null) {
+    const metaPath = join(wt, ".aidlc", "worktree-meta.json");
+    let meta: unknown;
+    try {
+      meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+    } catch {
+      return { error: `claimed converged but worktree base-commit metadata is missing or malformed for unit "${unit}"` };
+    }
+    if (
+      typeof meta !== "object" || meta === null || Array.isArray(meta) ||
+      (meta as Record<string, unknown>).baseCommit !== baseCommit
+    ) {
+      return { error: `claimed converged but worktree Base commit does not match its BOLT_STARTED attestation for unit "${unit}"` };
+    }
+  }
+
   const pendingRequests = new Map<string, boolean>();
   let latestTerminal: string | null = null;
   for (let i = boltStart + 1; i < events.length; i++) {
@@ -460,6 +480,54 @@ function reviewerReceiptError(
         `re-invoke the reviewer against the current worktree source and record a fresh ` +
         `verdict before finalizing`,
     };
+  }
+
+  // Pre-upgrade worktrees have no attested base commit and retain migration
+  // fail-open behavior. Modern worktrees must prove every application-source
+  // path in their footprint is inside this unit's validated manifest claims.
+  if (baseCommit !== null) {
+    const manifest = readUnitSourceManifest(wt, stage, unit);
+    if (!manifest.ok) {
+      return { error: `claimed converged but unit "${unit}" has no valid source manifest (${manifest.reason})` };
+    }
+    const idx = join(tmpdir(), `aidlc-swarm-footprint-${process.pid}-${randomUUID().slice(0, 8)}`);
+    const env = { ...process.env, GIT_INDEX_FILE: idx };
+    const git = (args: string[]) => spawnSync("git", ["-C", wt, ...args], {
+      env,
+      encoding: "utf-8",
+      maxBuffer: 512 * 1024 * 1024,
+    });
+    try {
+      if (git(["read-tree", "HEAD"]).status !== 0 || git(["add", "-A"]).status !== 0) {
+        return { error: `claimed converged but the worktree footprint could not be computed for unit "${unit}"` };
+      }
+      const excluded = git([
+        "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--",
+        ":(top)aidlc/", ":(top).aidlc/",
+        ":(glob)**/aidlc/spaces/*/intents/**/.aidlc-sensors/**",
+      ]);
+      if (excluded.status !== 0) return { error: `claimed converged but framework paths could not be excluded from unit "${unit}"'s footprint` };
+      const tree = git(["write-tree"]);
+      if (tree.status !== 0 || !tree.stdout.trim()) return { error: `claimed converged but the worktree footprint tree could not be written for unit "${unit}"` };
+      const diff = git(["diff", "--name-only", "-z", "--no-renames", baseCommit, tree.stdout.trim(), "--", ":(exclude,top)aidlc/**", ":(exclude,top).aidlc/**", ":(exclude,glob)**/aidlc/spaces/*/intents/**/.aidlc-sensors/**"]);
+      if (diff.status !== 0) return { error: `claimed converged but the worktree footprint could not be compared for unit "${unit}"` };
+      const outside = diff.stdout
+        .split("\0")
+        .filter(Boolean)
+        .filter((path) => !sourceClaimCovers(`\0${path}`, manifest));
+      if (outside.length > 0) {
+        const rendered = outside.slice(0, 10).join(", ") +
+          (outside.length > 10 ? ` … and ${outside.length - 10} more` : "");
+        return {
+          error:
+            `claimed converged but the worktree wrote application-source paths outside unit "${unit}"'s ` +
+            `source manifest (${rendered}); update construction/${unit}/code-generation/source-manifest.json ` +
+            `in the worktree, re-run the reviewer there, and record a fresh verdict before finalizing`,
+        };
+      }
+    } finally {
+      rmSync(idx, { force: true });
+    }
   }
   return { error: null, fingerprint: recordedSourceFp };
 }

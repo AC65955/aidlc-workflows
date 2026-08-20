@@ -39,6 +39,7 @@
 // exactly the receipt path the fingerprint filter protects.
 
 import { afterAll, beforeEach, afterEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -126,6 +127,7 @@ function recordReview(
   reviewer = REVIEWER,
   unit?: string,
   verdict = "READY",
+  claimPaths?: Array<{ path: string; repo?: string }>,
 ): void {
   // v2 requires every per-unit code-generation receipt to bind the declared
   // artifacts as well as workspace source. Seed the minimal real contract in
@@ -150,14 +152,14 @@ function recordReview(
     // receipt can be minted. Preserve every existing t304 scenario by claiming
     // the complete current source listing; Step 6 narrows claims per scenario.
     const listing = workspaceSourceListing(proj);
-    const writes = listing === null
+    const writes = claimPaths ?? (listing === null
       ? []
       : [...listing.keys()].map((key) => {
           const separator = key.indexOf("\0");
           const repo = key.slice(0, separator);
           const path = key.slice(separator + 1);
           return repo.length > 0 ? { repo, path } : { path };
-        });
+        }));
     // A valid empty manifest is conservative only for an unlistable fixture;
     // normal Git fixtures claim every listed application-source path above.
     writeFileSync(
@@ -1089,23 +1091,13 @@ describe("t304 multi-unit flow: what the workspace-global fingerprint does and d
     expect(r.rc).toBe(0);
   });
 
-  // DOCUMENTED LIMITATION (#646 review, first reported as a laundering bypass
-  // on aidlc-state.ts). alpha is reviewed, then edited with NO new review,
-  // then beta is coded and reviewed - beta's receipt stamps a fingerprint over
-  // the CURRENT tree, which already contains alpha's unreviewed edit, so the
-  // newest-matches-current comparison passes. The finding is real and is NOT
-  // fixed here: a workspace-global hash cannot attribute the changed file to
-  // alpha. Per #629's "explicitly documented policy" branch this is accepted
-  // and written down rather than guessed at; see the describe comment. This
-  // test asserts the documented behaviour so the policy is visible in code,
-  // and goes red when per-unit attribution lands.
-  test("a unit edited after its own review, then masked by a later unit's review, is accepted (documented limitation)", () => {
+  // RFC #662: alpha's earlier receipt cannot be laundered by beta's newer one.
+  test("a unit edited after its own review, then masked by a later unit's review, is refused", () => {
     writeFileSync(join(proj, "alpha.ts"), "export const alpha = 1;\n", "utf-8");
     git(proj, ["add", "-A"]);
     git(proj, ["commit", "-qm", "alpha code v1"]);
-    recordReview(proj, "code-generation", REVIEWER, "alpha");
+    recordReview(proj, "code-generation", REVIEWER, "alpha", "READY", [{ path: "alpha.ts" }]);
 
-    // Edited with NO new review recorded for alpha.
     writeFileSync(join(proj, "alpha.ts"), "export const alpha = 999; // no re-review\n", "utf-8");
     git(proj, ["add", "-A"]);
     git(proj, ["commit", "-qm", "alpha edited, no re-review"]);
@@ -1113,54 +1105,41 @@ describe("t304 multi-unit flow: what the workspace-global fingerprint does and d
     writeFileSync(join(proj, "beta.ts"), "export const beta = 2;\n", "utf-8");
     git(proj, ["add", "-A"]);
     git(proj, ["commit", "-qm", "beta code"]);
-    recordReview(proj, "code-generation", REVIEWER, "beta");
+    recordReview(proj, "code-generation", REVIEWER, "beta", "READY", [{ path: "beta.ts" }]);
 
     const r = guarded(proj, ["approve", "code-generation", "--user-input", "ship it"]);
-    expect(r.out).not.toContain("source-fingerprint mismatch");
-    expect(r.rc).toBe(0);
+    expect(r.rc).toBe(1);
+    expect(r.out).toContain("Invalidated receipts: alpha");
   });
 
-  // DOCUMENTED LIMITATION, the inverse ordering (#646 review, inline comment
-  // on aidlc-state.ts): an EARLIER unit is RE-reviewed after a LATER unit was
-  // edited, so the newest fingerprint (stamped at alpha's second review)
-  // matches the workspace while beta's now-stale receipt survives. Same root
-  // cause, same accepted policy, same red-on-attribution intent.
-  test("re-reviewing an earlier unit carries a later unit's stale receipt (documented limitation)", () => {
+  // RFC #662: re-reviewing alpha cannot carry beta's stale receipt.
+  test("re-reviewing an earlier unit refuses a later unit's stale receipt", () => {
     writeFileSync(join(proj, "alpha.ts"), "export const alpha = 1;\n", "utf-8");
     git(proj, ["add", "-A"]);
     git(proj, ["commit", "-qm", "alpha code"]);
-    recordReview(proj, "code-generation", REVIEWER, "alpha");
+    recordReview(proj, "code-generation", REVIEWER, "alpha", "READY", [{ path: "alpha.ts" }]);
 
     writeFileSync(join(proj, "beta.ts"), "export const beta = 1;\n", "utf-8");
     git(proj, ["add", "-A"]);
     git(proj, ["commit", "-qm", "beta code"]);
-    recordReview(proj, "code-generation", REVIEWER, "beta");
+    recordReview(proj, "code-generation", REVIEWER, "beta", "READY", [{ path: "beta.ts" }]);
 
-    // Edit beta, no new review for beta.
     writeFileSync(join(proj, "beta.ts"), "export const beta = 999; // no re-review\n", "utf-8");
     git(proj, ["add", "-A"]);
     git(proj, ["commit", "-qm", "beta edited"]);
-
-    // Re-review alpha (not beta) - alpha's own content is unchanged, but the
-    // tree now includes beta's unreviewed edit.
-    recordReview(proj, "code-generation", REVIEWER, "alpha");
+    recordReview(proj, "code-generation", REVIEWER, "alpha", "READY", [{ path: "alpha.ts" }]);
 
     const r = guarded(proj, ["approve", "code-generation", "--user-input", "ship it"]);
-    expect(r.out).not.toContain("source-fingerprint mismatch");
-    expect(r.rc).toBe(0);
+    expect(r.rc).toBe(1);
+    expect(r.out).toContain("Invalidated receipts: beta");
   });
 
-  // DOCUMENTED LIMITATION - the `A`-shaped case, which the removed rule never
-  // blocked either: an added file is exactly as unreviewed as a modified one.
-  // Reachable in practice because the per-unit reviewer is briefed with only
-  // its own unit's artifacts (stage-protocol §12a), so beta's reviewer is
-  // never pointed at this file. Asserting rc 0 states the policy explicitly
-  // rather than leaving the gap undocumented.
-  test("an addition nobody reviewed is accepted by the workspace-global binding (documented limitation)", () => {
+  // RFC #662: an addition outside every fresh claim fails closed.
+  test("an addition nobody reviewed is refused as unclaimed", () => {
     writeFileSync(join(proj, "alpha.ts"), "export const alpha = 1;\n", "utf-8");
     git(proj, ["add", "-A"]);
     git(proj, ["commit", "-qm", "alpha code"]);
-    recordReview(proj, "code-generation", REVIEWER, "alpha");
+    recordReview(proj, "code-generation", REVIEWER, "alpha", "READY", [{ path: "alpha.ts" }]);
 
     writeFileSync(join(proj, "unreviewed.ts"), "export const extra = () => process.env;\n", "utf-8");
     git(proj, ["add", "-A"]);
@@ -1169,10 +1148,30 @@ describe("t304 multi-unit flow: what the workspace-global fingerprint does and d
     writeFileSync(join(proj, "beta.ts"), "export const beta = 2;\n", "utf-8");
     git(proj, ["add", "-A"]);
     git(proj, ["commit", "-qm", "beta code"]);
-    recordReview(proj, "code-generation", REVIEWER, "beta");
+    recordReview(proj, "code-generation", REVIEWER, "beta", "READY", [{ path: "beta.ts" }]);
+
+    // This fixture predates baseline producers, so create a baseline-bearing
+    // boundary from the original app.ts-only source snapshot deliberately.
+    const baselineDir = join(seededRecordDir(proj), ".aidlc-source-review", "code-generation");
+    mkdirSync(baselineDir, { recursive: true });
+    const appOid = spawnSync("git", ["-C", proj, "rev-parse", "HEAD~3:app.ts"], { encoding: "utf-8" }).stdout.trim();
+    const serialized = `\tapp.ts\t${appOid}\n`;
+    const hash = createHash("sha256").update(serialized).digest("hex");
+    writeFileSync(join(baselineDir, `baseline-${hash.slice(0, 12)}.tsv`), serialized, "utf-8");
+    const auditPath = seededAuditShard(proj);
+    writeFileSync(
+      auditPath,
+      readFileSync(auditPath, "utf-8").replace(
+        "# AI-DLC Audit Log",
+        `# AI-DLC Audit Log\n\n## Workflow Started\n**Timestamp**: 2000-01-01T00:00:00.000Z\n**Event**: WORKFLOW_STARTED\n**Source Baseline**: sha256:${hash}\n\n---`,
+      ),
+      "utf-8",
+    );
 
     const r = guarded(proj, ["approve", "code-generation", "--user-input", "ship it"]);
-    expect(r.rc).toBe(0);
+    expect(r.rc).toBe(1);
+    expect(r.out).toContain("Unclaimed source changes fail closed (RFC #662)");
+    expect(r.out).toContain("unreviewed.ts");
   });
 
   // #646 review - the recorded-repo layout is the DEFAULT (sibling

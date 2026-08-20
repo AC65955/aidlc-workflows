@@ -32,6 +32,11 @@ Everything else in this section is silent. Nothing is said about invoking, handi
      - For a **per-unit** stage (`directive.unit` present) these include the shared inception contracts that pin cross-unit boundaries (`components.md`, `contract-summary.md`, `unit-of-work.md`).
      - For a **workflow-level** stage with no `directive.unit` (e.g. `contract-design`), these are the upstream artifacts that justify the produced output — the unit DAG (`unit-of-work.md`, `unit-of-work-dependency.md`), the component catalogue (`components.md`), and `requirements.md` — so the reviewer can verify the contracts against the boundaries, entities, and NFRs they formalise rather than reviewing the summary in isolation.
    - The validation tools list from the stage definition's frontmatter (if any)
+   - For a per-unit `workspace_requires` stage, the unit's
+     `source-manifest.json` path and its claimed source paths. Review the
+     implementation differentially at those paths rather than sweeping the
+     whole workspace; treat any claim that looks unrelated to the unit as a
+     finding.
 
    Do NOT pass: `memory.md` (builder's diary) or any plan/reasoning files. The reviewer forms independent judgment.
 

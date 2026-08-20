@@ -59,6 +59,7 @@ import {
   resolveBoltDag,
   reviewArtifactFingerprint,
   resolveReviewClass,
+  sourceClaimCovers,
   resolveProjectDir,
   resolveStage,
   setCheckbox,
@@ -1843,12 +1844,10 @@ function verifyReviewerPrecondition(
   const receipts = freshReviewReceipts(pd, content, stage, { reviewClass });
   const perUnit = stage.for_each === "unit-of-work";
 
-  // Source-state equality composes with v2's bounded stale-receipt recovery:
-  // the newest modern binding is reconciled once for the workspace. A mismatch
-  // blocks every completion route and exposes one Recovery: stale-receipt pass,
-  // even when the normal iteration budget is exhausted. One fresh receipt
-  // against the current tree restores the collected per-unit receipts. This is
-  // deliberately not per-unit attribution; see RFC #662.
+  // Source-state equality composes with v2's bounded stale-receipt recovery.
+  // The workspace-global newest-receipt reconciliation remains the outer
+  // boundary; freshReviewReceipts additionally validates each modern unit
+  // binding and applies newest-fresh-claimant shielding per path.
   const sourceFreshnessOff =
     process.env.AIDLC_SKIP_SOURCE_FRESHNESS === "1";
   const settledSwarm = isSettledSwarmForArtifactGuard(pd, stage, content);
@@ -1865,12 +1864,17 @@ function verifyReviewerPrecondition(
     );
   }
 
-  // Already-[x] recovery skips only existence/cardinality. A modern binding was
-  // still compared above, so crash-window recovery cannot ship changed source.
+  // Already-[x] recovery skips only existence/cardinality and therefore every
+  // attribution check that depends on a complete fresh-unit claim union. The
+  // modern global binding was still compared above, preserving crash recovery.
   if (!requireReceiptExistence) return;
 
   const sawStageReview = receipts.stageVerdict !== null;
   const reviewedUnits = new Set(receipts.unitVerdicts.keys());
+
+  // A settled autonomous swarm was verified in each Bolt by finalize; its main
+  // checkout receipts/snapshots are not the binding surface.
+  if (settledSwarm) return;
 
   if (!perUnit) {
     if (!sawStageReview) {
@@ -1930,7 +1934,7 @@ function verifyReviewerPrecondition(
           `run \`aidlc-log.ts review --stage ${stage.slug} --unit <unit> --reviewer ` +
           `${reviewer} --iteration <next ordinal>\`, then record the verdict with ` +
           `the same command plus \`--verdict <READY|NOT-READY>\` and stop editing ` +
-          `produces[] artifacts.`,
+          `produces[] artifacts and that unit's claimed source paths.`,
       );
     }
     if (recoverySpent.length > 0) {
@@ -1962,6 +1966,55 @@ function verifyReviewerPrecondition(
         `${neverReviewed.length > 0 ? neverReviewed.join(", ") : "none"}. ` +
         guidance.join(" ")
     );
+  }
+
+  const attributionApplies =
+    stage.workspace_requires === true && !sourceFreshnessOff && !settledSwarm;
+  if (!attributionApplies) return;
+
+  if (
+    receipts.sourceBaseline.state === "unbindable" ||
+    receipts.sourceBaseline.state === "invalid"
+  ) {
+    error(
+      `Refusing to complete "${stage.slug}": the stage's source baseline snapshot is missing or does not ` +
+        `match its recorded hash, so unclaimed source changes cannot be verified. Re-enter the stage ` +
+        `(a stage jump records a fresh baseline) or set AIDLC_SKIP_SOURCE_FRESHNESS=1 to bypass ` +
+        `deterministically.`,
+    );
+  }
+  if (
+    receipts.sourceBaseline.state === "ready" &&
+    receipts.currentSourceListing !== null
+  ) {
+    const changed = new Set<string>();
+    const baseline = receipts.sourceBaseline.listing;
+    for (const [pathKey, oid] of baseline) {
+      if (receipts.currentSourceListing.get(pathKey) !== oid) changed.add(pathKey);
+    }
+    for (const pathKey of receipts.currentSourceListing.keys()) {
+      if (!baseline.has(pathKey)) changed.add(pathKey);
+    }
+    const claimModels = [...receipts.freshUnitClaims.values()];
+    const unclaimed = [...changed]
+      .filter((pathKey) => !claimModels.some((claims) => sourceClaimCovers(pathKey, claims)))
+      .sort();
+    if (unclaimed.length > 0) {
+      const rendered = unclaimed.slice(0, 10).map((key) => {
+        const separator = key.indexOf("\0");
+        const repo = key.slice(0, separator);
+        const path = key.slice(separator + 1);
+        return repo ? `${repo}/${path}` : path;
+      });
+      const more = unclaimed.length > 10 ? ` … and ${unclaimed.length - 10} more` : "";
+      error(
+        `Refusing to complete "${stage.slug}": ${unclaimed.length} application-source path(s) changed during this stage run ` +
+          `that no reviewed unit's source manifest claims (${rendered.join(", ")}${more}). Add each path to the owning ` +
+          `unit's source-manifest.json and record that unit's one bounded stale-receipt recovery review ` +
+          `(aidlc-log.ts review --stage ${stage.slug} --unit <unit> --reviewer ${reviewer} --iteration <next ordinal>, ` +
+          `then --verdict <READY|NOT-READY>), or revert the change. Unclaimed source changes fail closed (RFC #662).`,
+      );
+    }
   }
 }
 
