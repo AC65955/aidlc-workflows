@@ -28,7 +28,7 @@ export const MODEL_GROUPS = {
     label: "Reviewing",
     tier: "balanced",
     tradeoff:
-      "More effort gives review passes more deliberation. At xhigh, measured review wall-clock is roughly 9x medium (#612 data).",
+      "More effort gives review passes more deliberation, trading review time and cost for correctness.",
   },
   "writing-up": {
     label: "Writing up",

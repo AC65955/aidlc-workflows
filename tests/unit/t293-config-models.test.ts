@@ -510,7 +510,7 @@ describe("t293 config models CLI", () => {
       "Reviewing   2 agents   sonnet/medium -> sonnet/xhigh (model unchanged)",
     );
     expect(applied.stdout).toContain(
-      "Cost: roughly 9x the wall-clock per review (#612 data).",
+      "Deepest review passes - built for correctness-critical work; reviews run slower and cost more.",
     );
 
     const shown = run([
@@ -744,7 +744,7 @@ describe("t293 config models CLI", () => {
     expect(unsupported.stdout).toContain(
       "Kiro CLI cannot express group effort dials today",
     );
-    expect(unsupported.stdout).not.toContain("roughly 9x");
+    expect(unsupported.stdout).not.toContain("reviews run slower and cost more");
     const unsupportedPolicy = resolvedPolicy(project, "kiro");
     expect(
       modelPolicySurfaceDrift(project, ".kiro", "kiro", unsupportedPolicy).length,

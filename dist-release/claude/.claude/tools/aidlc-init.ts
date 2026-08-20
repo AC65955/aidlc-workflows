@@ -598,7 +598,7 @@ function showModels(
     output += `  ${label}: ${item.model ?? "inherit"} / ${item.effort ?? "inherit"}\n`;
     if (item.group === "reviewing") {
       output +=
-        "    Review-only agents use the measured medium baseline. At xhigh, measured review wall-clock is roughly 9x medium (#612 data).\n";
+        "    Review-only agents use the measured medium baseline; raising effort trades review time and cost for deeper correctness checking.\n";
     }
     if (item.layer === "agent-exception" || item.layer === "group-dial") {
       output += `    Recorded override: ${dim(item.layer, out)}; model ${
@@ -760,7 +760,7 @@ function groupPolicyEffort(
 
 function effortTradeoff(group: ModelGroup, effort: ModelEffort): string {
   if (group === "reviewing" && effort === "xhigh") {
-    return "Deeper review passes. Cost: roughly 9x the wall-clock per review (#612 data).";
+    return "Deepest review passes - built for correctness-critical work; reviews run slower and cost more.";
   }
   if (effort === "low" || effort === "medium") {
     return group === "deciding"
@@ -4143,7 +4143,7 @@ function customizeFirstRun(
     if (step === 3) {
       process.stdout.write("  Step 3 of 6 - Model effort preset\n");
       process.stdout.write("    1. balanced    reviewing at medium effort - the shipped default\n");
-      process.stdout.write("    2. thorough    reviewing at xhigh effort - deepest review, ~9x slower\n");
+      process.stdout.write("    2. thorough    reviewing at xhigh effort - deepest correctness checking; slower, costlier reviews\n");
       process.stdout.write("    3. minimal     lightest touch - review medium, write-ups at low effort\n");
       const selected = promptChoice(
         "  Preset",
