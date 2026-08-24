@@ -22,6 +22,96 @@ never hand-edit it (the drift guard fails CI).
   comment out the provider lines. Note: `web_search` is unavailable on
   Bedrock; the market-research stage degrades gracefully.
 
+## Router-gated fork bootstrap
+
+Use this bootstrap for the fork that includes the native AIDLC v2 lifecycle
+gate. It needs two independent checkouts: this AIDLC fork and
+`ai-harness-route`. The router path is machine-local, so do **not** add it to
+the shared project `.codex/config.toml` or commit it.
+
+The example assumes a fresh Git project and a terminal-launched Codex CLI.
+Replace the three paths and the fork URL before running it:
+
+```bash
+export AIDLC_SRC="/absolute/path/to/aidlc-workflows"
+export HARNESS_ROUTE_SRC="/absolute/path/to/ap-ai-harness-route"
+export PROJECT_DIR="/absolute/path/to/your-project"
+
+git clone <your-aidlc-fork-url> "$AIDLC_SRC"
+git -C "$AIDLC_SRC" switch feat/aidlc-v2-native-lifecycle-gate
+git clone <your-harness-route-url> "$HARNESS_ROUTE_SRC"
+
+mkdir -p "$PROJECT_DIR"
+git -C "$PROJECT_DIR" init
+
+cd "$AIDLC_SRC"
+bun install --frozen-lockfile
+bun scripts/package.ts codex
+
+cd "$HARNESS_ROUTE_SRC"
+bun install --frozen-lockfile
+
+cd "$AIDLC_SRC"
+cp -R dist/codex/.codex "$PROJECT_DIR/.codex"
+cp -R dist/codex/.agents "$PROJECT_DIR/.agents"
+cp -R dist/codex/aidlc "$PROJECT_DIR/aidlc"
+cp dist/codex/AGENTS.md "$PROJECT_DIR/AGENTS.md"
+```
+
+The copied `.codex/config.toml` includes the shared AIDLC method setting:
+
+```toml
+[shell_environment_policy]
+set = { AIDLC_RULES_DIR = "aidlc/spaces/default/memory" }
+```
+
+Keep that setting. Configure the model provider and any personal AWS profile
+in the local/user Codex configuration as needed; do not put credentials in the
+project repository.
+
+Next, trust the exact generated hook manifest. Run this from the AIDLC source
+checkout and paste the complete generated TOML into the user's
+`$CODEX_HOME/config.toml`, replacing any prior entries for the same project
+hook path:
+
+```bash
+cd "$AIDLC_SRC"
+bun scripts/package.ts codex trust --project "$PROJECT_DIR"
+```
+
+Finally, start Codex with the router checkout available to the hook process:
+
+```bash
+cd "$PROJECT_DIR"
+AIDLC_HARNESS_ROUTE_ROOT="$HARNESS_ROUTE_SRC" codex
+```
+
+`AIDLC_HARNESS_ROUTE_ROOT` is required by
+`.codex/hooks/aidlc-router-wrapper.ts`. It must point to a checkout containing
+`adapters/codex/route-hook.ts` and `adapters/aidlc-v2/route-gate.ts`. If it is
+missing, malformed, or the router returns no matching `enable-hook-chain`, the
+wrapper fails closed and runs no AIDLC lifecycle hook. Export this variable in
+the launcher environment used for every Codex CLI session; a shell profile such
+as `~/.zshenv` is appropriate for a terminal CLI setup.
+
+Verify the bootstrap before starting work:
+
+```bash
+cd "$PROJECT_DIR"
+AIDLC_HARNESS_ROUTE_ROOT="$HARNESS_ROUTE_SRC" \
+  bun .codex/tools/aidlc-utility.ts doctor
+AIDLC_HARNESS_ROUTE_ROOT="$HARNESS_ROUTE_SRC" \
+  codex --strict-config --help
+```
+
+Fresh sessions start in Direct mode even if old AIDLC files exist. To bind an
+existing runnable intent, use `$aidlc intent <intent>`; the bridge validates it
+and returns its canonical `space:UUID` before the router writes a binding. A
+parked intent may be bound only through `$aidlc intent <intent> --resume`; its
+lifecycle hooks remain inactive until AIDLC completes the resume path. A
+completed or cancelled intent is rejected. A cross-provider prompt is a
+handoff boundary: it does not run an AIDLC hook for that turn.
+
 ## Install
 
 The copies below come from a clone of the

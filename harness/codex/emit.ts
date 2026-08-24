@@ -53,8 +53,11 @@ const HOOK_WIRING: Array<{ event: string; matcher?: string; target: string }> = 
   { event: "Stop", target: "continue-workflow" },
 ];
 
+// The router wrapper owns the outer activation gate. It invokes the existing
+// native adapter only after ai-harness-route enables the AIDLC v2 chain for the
+// current event and the provider-native gate grants advance authority.
 const adapterCmd = (harnessDir: string, target: string) =>
-  `bun ${harnessDir}/hooks/aidlc-codex-adapter.ts ${target}`;
+  `bun ${harnessDir}/hooks/aidlc-router-wrapper.ts ${target}`;
 
 function emitHooksJson(harnessDir: string): string {
   const hooks: Record<string, Array<Record<string, unknown>>> = {};

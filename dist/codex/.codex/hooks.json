@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts session-start"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts session-start"
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts record-human-turn"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts record-human-turn"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts deliver-stage-rules"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts deliver-stage-rules"
           }
         ],
         "matcher": "spawn_agent"
@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts state-transition-guard"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts state-transition-guard"
           }
         ]
       },
@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts reviewer-scope"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts reviewer-scope"
           }
         ]
       },
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts review-freeze"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts review-freeze"
           }
         ]
       },
@@ -58,7 +58,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts plan-approval-guard"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts plan-approval-guard"
           }
         ]
       }
@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts audit-and-sensors"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts audit-and-sensors"
           }
         ],
         "matcher": "apply_patch"
@@ -77,7 +77,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts sync-workflow-state"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts sync-workflow-state"
           }
         ],
         "matcher": "update_plan"
@@ -86,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts rebuild-stage-graph"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts rebuild-stage-graph"
           }
         ],
         "matcher": "Bash"
@@ -97,7 +97,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts validate-state"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts validate-state"
           }
         ]
       }
@@ -107,7 +107,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts log-subagent"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts log-subagent"
           }
         ]
       }
@@ -117,7 +117,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts continue-workflow"
+            "command": "bun .codex/hooks/aidlc-router-wrapper.ts continue-workflow"
           }
         ]
       }
