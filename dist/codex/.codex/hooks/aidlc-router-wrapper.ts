@@ -94,7 +94,7 @@ export async function run(target: string, input: string): Promise<number> {
     if (binding?.accepted !== true || !identity) return 0;
     const flag = request.purpose === "resume" ? "--resume-confirmed" : "--provider-confirmed";
     const activated = jsonProcess(
-      ["bun", "run", "route", "--", "activate", "--session", sessionId, "--provider", "aidlc", "--resource", identity, flag],
+      ["bun", "run", "route", "--", "activate", "--repo", projectDir, "--session", sessionId, "--provider", "aidlc", "--resource", identity, flag],
       "",
       root,
     );
