@@ -1079,6 +1079,10 @@ describe("mechanismsOf is body-derived (milestone 3)", () => {
     "unit/t323-review-verdict-closure.test.ts",
     "unit/t328-nodag-per-unit-continuity.test.ts",
     "unit/t312-orchestrate-session-binding.test.ts",
+    // t314 drives the packaged Codex gate and the actual orchestrator CLI in
+    // child processes, so its alpha/beta cursor-drift proof covers the real
+    // subprocess environment boundary rather than a mocked function call.
+    "unit/t314-codex-native-session-gate.test.ts",
     "unit/t255-workspace-sync.test.ts",
     "unit/t314-minimal-scope-performance.test.ts",
     "unit/t314-source-freshness-receipts.test.ts",

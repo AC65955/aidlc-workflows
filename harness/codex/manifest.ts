@@ -12,8 +12,8 @@
 //   - skills are NOT shipped in .codex/skills/ — Codex discovers skills at
 //     <project>/.agents/skills/, so skipRunnerGen is set and emit() composes
 //     the whole skill set (orchestrator + runners + session skills) there.
-//   - the only authored .codex/ file is the aidlc-codex-adapter.ts stdin shim
-//     (a harnessFile); the agent TOMLs in .codex/agents/ are emitted.
+//   - the authored .codex/ hook files are the native session gate and its
+//     adapter shim (harnessFiles); agent TOMLs in .codex/agents/ are emitted.
 
 import type { HarnessManifest } from "../../scripts/manifest-types.ts";
 import emit from "./emit.ts";
@@ -38,10 +38,12 @@ const manifest: HarnessManifest = {
     { src: "hooks", dst: "hooks" },
   ],
 
-  // The one authored .codex/ surface: the stdin adapter shim. The orchestrator
-  // skill is authored too but is EMITTED into .agents/skills/aidlc/ by emit().
+  // The session gate is the hook entrypoint; it calls the adapter only after a
+  // session has explicitly selected an intent. The orchestrator skill is
+  // authored too but is EMITTED into .agents/skills/aidlc/ by emit().
   harnessFiles: [
     { src: "hooks/aidlc-codex-adapter.ts", dst: "hooks/aidlc-codex-adapter.ts" },
+    { src: "hooks/aidlc-session-gate.ts", dst: "hooks/aidlc-session-gate.ts" },
     // Project-root .gitignore (beside .codex/, not inside it) — re-rooted under
     // aidlc/spaces/* for the workspace layout (SEED): cursors + machine-local
     // runtime ignored, the shared work (memory/codekb/registry/state/audit

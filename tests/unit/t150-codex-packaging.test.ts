@@ -146,15 +146,15 @@ describe("t150 dist/codex packaging parity + drift guard", () => {
   });
 
   test("2: every packaged .ts file is byte-identical to its dist/claude source (code is never transformed)", () => {
-    // tools/ + hooks/ carry the deterministic core. The codex adapter
-    // (authored shell, aidlc-codex-*.ts) has no claude counterpart and is
-    // exempt; everything else must match its source byte-for-byte.
+    // tools/ + hooks/ carry the deterministic core. The Codex-native adapter
+    // and session gate are authored shells with no Claude counterpart; every
+    // other file must match its source byte-for-byte.
     const divergent: string[] = [];
     for (const sub of ["tools", "hooks"]) {
       const dstDir = join(CODEX_DST, sub);
       for (const file of walk(dstDir)) {
         if (!file.endsWith(".ts")) continue;
-        if (/aidlc-codex-[^/]+\.ts$/.test(file)) continue;
+        if (/aidlc-codex-[^/]+\.ts$|aidlc-session-gate\.ts$/.test(file)) continue;
         const rel = file.slice(dstDir.length + 1);
         const src = join(CLAUDE_SRC, sub, rel);
         if (!readFileSync(file).equals(readFileSync(src))) divergent.push(`${sub}/${rel}`);
@@ -214,16 +214,13 @@ describe("t150 dist/codex packaging parity + drift guard", () => {
     expect(
       wiring.hooks.PostToolUse.find((group) => group.matcher === "request_user_input")
         ?.hooks[0]?.command,
-    ).toBe("bun .codex/hooks/aidlc-codex-adapter.ts record-human-turn");
-    expect(
-      wiring.hooks.PreToolUse.find((group) => group.matcher === "Bash")
-        ?.hooks[0]?.command,
-    ).toBe("bun .codex/hooks/aidlc-codex-adapter.ts bind-bash-session");
-    // Every registration routes through the single authored adapter.
+    ).toBe("bun .codex/hooks/aidlc-session-gate.ts record-human-turn");
+    // Every registration routes through the native session gate, which invokes
+    // the adapter only after an explicit per-session intent binding.
     for (const groups of Object.values(wiring.hooks)) {
       for (const g of groups) {
         for (const h of g.hooks) {
-          expect(h.command).toMatch(/^bun \.codex\/hooks\/aidlc-codex-adapter\.ts [a-z-]+$/);
+          expect(h.command).toMatch(/^bun \.codex\/hooks\/aidlc-session-gate\.ts [a-z-]+$/);
         }
       }
     }
@@ -265,7 +262,7 @@ describe("t150 dist/codex packaging parity + drift guard", () => {
     // — a concrete anchor so a silent recipe change can't pass by emitting a
     // self-consistent but wrong hash for every entry.
     expect(shippedBody).toContain(
-      'session_start:0:0"]\ntrusted_hash = "sha256:ec7321a5902723dfe5d1b79fe13a48724fdf69a2029f83d4168ae28da6121c96"',
+      'session_start:0:0"]\ntrusted_hash = "sha256:cda06cbade8233fc54fdc8888444217be51e70afd82ba03303098aebe019804b"',
     );
   });
 
@@ -306,7 +303,7 @@ describe("t150 dist/codex packaging parity + drift guard", () => {
     // The common Unix form remains byte-identical to the historical output.
     expect(emitTrustEntries("/tmp/example-proj")).toStartWith(
       '[hooks.state."/tmp/example-proj/.codex/hooks.json:session_start:0:0"]\n' +
-        'trusted_hash = "sha256:ec7321a5902723dfe5d1b79fe13a48724fdf69a2029f83d4168ae28da6121c96"\n\n',
+        'trusted_hash = "sha256:cda06cbade8233fc54fdc8888444217be51e70afd82ba03303098aebe019804b"\n\n',
     );
   });
 

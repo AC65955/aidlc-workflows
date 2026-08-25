@@ -51,6 +51,10 @@ const HOOK_WIRING: Array<{ event: string; matcher?: string; target: string }> = 
   // No matcher: the plan-approval-guard target self-filters to spawn_agent
   // naming the developer agent plus mutation-capable Bash/apply_patch calls.
   { event: "PreToolUse", target: "plan-approval-guard" },
+  // Codex applies updatedInput before executing Bash. This is the durable
+  // session-scope bridge: it prefixes real AIDLC CLI commands with the bound
+  // intent environment, which their own subprocesses inherit.
+  { event: "PreToolUse", matcher: "Bash", target: "scope-bash-command" },
   { event: "PostToolUse", matcher: "request_user_input", target: "record-human-turn" },
   { event: "PostToolUse", matcher: "apply_patch", target: "audit-and-sensors" },
   { event: "PostToolUse", matcher: "update_plan", target: "sync-workflow-state" },
@@ -61,7 +65,7 @@ const HOOK_WIRING: Array<{ event: string; matcher?: string; target: string }> = 
 ];
 
 const adapterCmd = (harnessDir: string, target: string) =>
-  `bun ${harnessDir}/hooks/aidlc-codex-adapter.ts ${target}`;
+  `bun ${harnessDir}/hooks/aidlc-session-gate.ts ${target}`;
 
 function emitHooksJson(harnessDir: string): string {
   const hooks: Record<string, Array<Record<string, unknown>>> = {};
