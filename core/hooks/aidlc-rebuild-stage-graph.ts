@@ -46,6 +46,7 @@ import {
   writeSessionBinding,
   writeSessionIntentUuid,
 } from "../tools/aidlc-lib.ts";
+import { writeNativeSessionBinding } from "../tools/aidlc-session-binding.ts";
 
 // intent-create runs before a workflow exists, so SessionStart cannot stamp that
 // conversation yet. PostToolUse is the first boundary that carries both the
@@ -93,6 +94,12 @@ function bindCreatedIntentToInvokingSession(
   if (!created?.uuid) return;
   writeSessionBinding(projectDir, sessionId, space, dirName);
   if (existingUuid && existingUuid !== created.uuid) {
+  // An intent-create command is an explicit workflow entry. Codex records the
+  // authoritative native binding even where the legacy lifecycle stamp was
+  // already occupied by a prior intent in the same conversation.
+  if (harnessDir() === ".codex") {
+    writeNativeSessionBinding(projectDir, sessionId, created.uuid);
+  }
     writeSessionIntentHandoff(projectDir, sessionId, existingUuid, created.uuid);
   }
   writeSessionIntentUuid(projectDir, sessionId, created.uuid);

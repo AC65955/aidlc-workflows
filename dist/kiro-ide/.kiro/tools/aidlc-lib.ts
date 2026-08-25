@@ -1555,6 +1555,8 @@ function canonicalPathKey(path: string): string {
 // defaults to "default". NEVER throws — the default space is always valid even
 // when nothing is on disk yet (the resolver tolerates an absent space dir).
 export function activeSpace(projectDir: string): string {
+  const scoped = process.env.AIDLC_HOOK_INTENT_SPACE;
+  if (scoped && SPACE_NAME_REGEX.test(scoped)) return scoped;
   const ptr = join(workspaceRoot(projectDir), ACTIVE_SPACE_POINTER);
   try {
     const raw = readFileSync(ptr, "utf-8").trim();
@@ -1638,6 +1640,18 @@ export function activeIntent(
   const sp = space ?? activeSpace(projectDir);
   const dir = intentsDir(projectDir, sp);
   if (explicit) return explicit;
+  // The native Codex session gate supplies this process-local context only
+  // after validating an explicit binding. It has precedence over a shared
+  // active-intent cursor so concurrent sessions never cross-write artifacts or
+  // audit rows when one user switches intent.
+  const scopedSpace = process.env.AIDLC_HOOK_INTENT_SPACE;
+  const scopedIntent = process.env.AIDLC_HOOK_INTENT_DIR;
+  if (
+    scopedSpace === sp &&
+    scopedIntent &&
+    /^[A-Za-z0-9._-]+$/.test(scopedIntent) &&
+    existsSync(join(dir, scopedIntent, "aidlc-state.md"))
+  ) return scopedIntent;
   // Cursor: a real record the pointer names.
   try {
     const raw = readFileSync(join(dir, ACTIVE_INTENT_POINTER), "utf-8").trim();

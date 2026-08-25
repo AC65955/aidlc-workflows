@@ -176,6 +176,7 @@ const shippedAidlcEntrypoints: ReadonlySet<string> = new Set<string>(
     "tools/aidlc-sensor-type-check.ts",
     "tools/aidlc-sensor-upstream-coverage.ts",
     "tools/aidlc-sensor.ts",
+    "tools/aidlc-session-binding.ts",
     "tools/aidlc-stage-schema.ts",
     "tools/aidlc-state.ts",
     "tools/aidlc-steering.ts",
