@@ -27,6 +27,7 @@ import { pathToFileURL } from "node:url";
 import { appendAuditEntry, appendAuditEntryUnlocked } from "./aidlc-audit.ts";
 import { main as pluginBuildMain } from "./aidlc-plugin-build.ts";
 import { main as pluginValidateMain } from "./aidlc-plugin-validate.ts";
+import { clearNativeSessionBinding, writeNativeSessionBinding } from "./aidlc-session-binding.ts";
 import {
   adaptLegacyResult,
   buildBundle,
@@ -5437,6 +5438,19 @@ function ensureWorkspaceDirs(projectDir: string, scope: string): void {
 // the workflow to its first post-init stage — relocated here, now writing into
 // the CREATED intent's record (the active-intent cursor set first makes the
 // default-resolving state/audit helpers resolve there).
+function bindCreatedIntentToNativeSession(projectDir: string): void {
+  const sessionId = process.env.AIDLC_CREATE_SESSION_ID;
+  if (!sessionId) return;
+  const space = activeSpace(projectDir);
+  const dirName = activeIntent(projectDir, undefined, undefined);
+  const intent = dirName
+    ? listIntents(projectDir, space).find((candidate) => candidate.dirName === dirName)
+    : undefined;
+  if (!intent?.uuid || !writeNativeSessionBinding(projectDir, sessionId, intent.uuid)) {
+    throw new Error("Created intent could not be bound to the invoking Codex session.");
+  }
+}
+
 function handleIntentCreate(projectDir: string, flags: Record<string, string>): void {
   // Creation mutates the registry and active cursor. Refuse an invocation that
   // carries no meaningful scope or description instead of minting a default
@@ -5564,6 +5578,7 @@ function handleIntentCreate(projectDir: string, flags: Record<string, string>): 
             reviewUpdate.storedReview || "cleared (stage defaults apply)",
         });
       }
+      bindCreatedIntentToNativeSession(projectDir);
       process.stdout.write(
         `Migrated flat workspace into intent: ${migration.intentDirName} (space: ${DEFAULT_SPACE})\n`,
       );
@@ -6009,6 +6024,7 @@ ${stageProgress}
   // Combined stdout summary (intent created + state-build). The active-intent
   // cursor + the record dir were set by createIntent above; the state file lives
   // under the created intent's record (resolved by writeStateFile's default).
+  bindCreatedIntentToNativeSession(projectDir);
   const submoduleWarningLine =
     uninitSubmodules.length > 0
       ? `Warning: ${uninitSubmodules.length} uninitialized git submodule path(s) (${enumerateSubmodulePaths(uninitSubmodules)}) - run '${SUBMODULE_INIT_REMEDY}' before proceeding so reverse-engineering can read the code.\n`
@@ -6202,6 +6218,13 @@ function handleIntent(
     clearSessionRebindOffer(projectDir, sid);
     if (match.uuid) writeSessionIntentUuid(projectDir, sid, match.uuid);
   }
+  // Native Codex selection commands run under a short-lived hook context.
+  // Persist the selected record as this session's binding only after the
+  // cursor update succeeded, so Direct -> Bound is atomic from the command's
+  // point of view. A normal bound switch uses the existing hook session id;
+  // a Direct switch carries the selection-only id injected by the gate.
+  const nativeSessionId = process.env.AIDLC_HOOK_SESSION_ID ?? process.env.AIDLC_SELECT_SESSION_ID;
+  if (nativeSessionId && match.uuid) writeNativeSessionBinding(projectDir, nativeSessionId, match.uuid);
   process.stdout.write(`Active intent → ${match.dirName} (space: ${space})\n`);
 }
 
@@ -6271,6 +6294,11 @@ function handleSpace(projectDir: string, positional: string[], flags: Record<str
   // own resolver; the CLI-native include is the ambient channel). Surgical
   // in-place rewrite of the pointer segment only — preserves all engine wiring.
   const repointed = repointHarnessIncludes(projectDir, target);
+  // A native Codex binding is intent-specific. After a global space change the
+  // session returns to Direct; it must explicitly select a target-space intent
+  // before any later workflow mutation can run.
+  const nativeSessionId = process.env.AIDLC_HOOK_SESSION_ID;
+  if (nativeSessionId) clearNativeSessionBinding(projectDir, nativeSessionId);
   process.stdout.write(`Active space → ${target}\n`);
   if (repointed.length > 0) {
     process.stdout.write(`  repointed ${repointed.length} harness include(s) → ${target}\n`);

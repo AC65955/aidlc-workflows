@@ -14,6 +14,7 @@ import {
   artifactFilename,
   KNOWN_CODEKB_STAGES,
 } from "./aidlc-artifact-vocabulary.ts";
+import { readNativeSessionBindingStore, type NativeSessionBinding } from "./aidlc-session-binding-store.ts";
 export {
   artifactFilename,
   KNOWN_CODEKB_STAGES,
@@ -1551,11 +1552,37 @@ function canonicalPathKey(path: string): string {
   }
 }
 
+// Hook variables are a convenience transport, not an authority on their own:
+// direct CLI callers can set environment variables. Accept scoped resolution
+// only when all fields match the durable per-session binding that the Codex
+// gate created. Other harnesses have no such variables and retain their
+// existing cursor-based behaviour.
+function validatedNativeScope(projectDir: string): NativeSessionBinding | null {
+  const sessionId = process.env.AIDLC_HOOK_SESSION_ID;
+  const space = process.env.AIDLC_HOOK_INTENT_SPACE;
+  const intentDir = process.env.AIDLC_HOOK_INTENT_DIR;
+  const intentUuid = process.env.AIDLC_HOOK_INTENT_UUID;
+  if (!sessionId || !space || !intentDir || !intentUuid) return null;
+  const binding = readNativeSessionBindingStore(projectDir, sessionId);
+  if (!binding ||
+    binding.space !== space ||
+    binding.intentDir !== intentDir ||
+    binding.intentUuid !== intentUuid) return null;
+  const registryEntry = readIntentRegistry(projectDir, binding.space).find(
+    (entry) => entry.uuid === binding.intentUuid,
+  );
+  return registryEntry &&
+    recordDirMatches(registryEntry, binding.intentDir) &&
+    existsSync(join(intentsDir(projectDir, binding.space), binding.intentDir, "aidlc-state.md"))
+    ? binding
+    : null;
+}
+
 // The active space for this project. Reads the `aidlc/active-space` cursor;
 // defaults to "default". NEVER throws — the default space is always valid even
 // when nothing is on disk yet (the resolver tolerates an absent space dir).
 export function activeSpace(projectDir: string): string {
-  const scoped = process.env.AIDLC_HOOK_INTENT_SPACE;
+  const scoped = validatedNativeScope(projectDir)?.space;
   if (scoped && SPACE_NAME_REGEX.test(scoped)) return scoped;
   const ptr = join(workspaceRoot(projectDir), ACTIVE_SPACE_POINTER);
   try {
@@ -1644,14 +1671,12 @@ export function activeIntent(
   // after validating an explicit binding. It has precedence over a shared
   // active-intent cursor so concurrent sessions never cross-write artifacts or
   // audit rows when one user switches intent.
-  const scopedSpace = process.env.AIDLC_HOOK_INTENT_SPACE;
-  const scopedIntent = process.env.AIDLC_HOOK_INTENT_DIR;
+  const scoped = validatedNativeScope(projectDir);
   if (
-    scopedSpace === sp &&
-    scopedIntent &&
-    /^[A-Za-z0-9._-]+$/.test(scopedIntent) &&
-    existsSync(join(dir, scopedIntent, "aidlc-state.md"))
-  ) return scopedIntent;
+    scoped?.space === sp &&
+    /^[A-Za-z0-9._-]+$/.test(scoped.intentDir) &&
+    existsSync(join(dir, scoped.intentDir, "aidlc-state.md"))
+  ) return scoped.intentDir;
   // Cursor: a real record the pointer names.
   try {
     const raw = readFileSync(join(dir, ACTIVE_INTENT_POINTER), "utf-8").trim();

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts session-start"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts session-start"
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts record-human-turn"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts record-human-turn"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts bind-bash-session"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts bind-bash-session"
           }
         ],
         "matcher": "Bash"
@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts deliver-stage-rules"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts deliver-stage-rules"
           }
         ],
         "matcher": "spawn_agent"
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts state-transition-guard"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts state-transition-guard"
           }
         ]
       },
@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts reviewer-scope"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts reviewer-scope"
           }
         ]
       },
@@ -59,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts review-freeze"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts review-freeze"
           }
         ]
       },
@@ -67,9 +67,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts plan-approval-guard"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts plan-approval-guard"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun .codex/hooks/aidlc-session-gate.ts scope-bash-command"
+          }
+        ],
+        "matcher": "Bash"
       }
     ],
     "PostToolUse": [
@@ -77,7 +86,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts record-human-turn"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts record-human-turn"
           }
         ],
         "matcher": "request_user_input"
@@ -86,7 +95,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts audit-and-sensors"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts audit-and-sensors"
           }
         ],
         "matcher": "apply_patch"
@@ -95,7 +104,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts sync-workflow-state"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts sync-workflow-state"
           }
         ],
         "matcher": "update_plan"
@@ -104,7 +113,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts rebuild-stage-graph"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts rebuild-stage-graph"
           }
         ],
         "matcher": "Bash"
@@ -115,7 +124,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts validate-state"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts validate-state"
           }
         ]
       }
@@ -125,7 +134,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts log-subagent"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts log-subagent"
           }
         ]
       }
@@ -135,7 +144,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/aidlc-codex-adapter.ts continue-workflow"
+            "command": "bun .codex/hooks/aidlc-session-gate.ts continue-workflow"
           }
         ]
       }

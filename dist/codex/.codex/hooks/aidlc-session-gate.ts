@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 const HOOKS_DIR = dirname(fileURLToPath(import.meta.url));
 const ADAPTER = join(HOOKS_DIR, "aidlc-codex-adapter.ts");
 const BINDING = join(HOOKS_DIR, "..", "tools", "aidlc-session-binding.ts");
+const ENTRY_SURFACE = join(HOOKS_DIR, "..", "tools", "aidlc-entry-surface.ts");
+const SESSION_COMMAND = join(HOOKS_DIR, "aidlc-session-command.ts");
 
 interface CodexHookInput {
   session_id?: unknown;
@@ -21,13 +23,19 @@ interface CodexHookInput {
 }
 
 interface GateDecision {
-  allow?: unknown;
+  action?: unknown;
+  reason?: unknown;
+  recovery?: unknown;
   context?: {
     sessionId?: unknown;
     intentUuid?: unknown;
     space?: unknown;
     intentDir?: unknown;
   };
+}
+
+interface EntryClassification {
+  kind?: unknown;
 }
 
 interface HookIntentContext {
@@ -50,10 +58,6 @@ function prompt(input: CodexHookInput): string | undefined {
   return stringField(input.prompt) ?? stringField(input.user_prompt) ?? stringField(input.message) ?? undefined;
 }
 
-function intentCreate(command: string | undefined): boolean {
-  return Boolean(command && /\b(?:aidlc-utility\.ts\s+intent-create|aidlc\s+intent(?:\s+create|-create))\b/i.test(command));
-}
-
 function runAdapter(target: string, input: string, cwd: string, env: Record<string, string | undefined>): number {
   const result = Bun.spawnSync([process.execPath, ADAPTER, target], {
     cwd,
@@ -65,6 +69,22 @@ function runAdapter(target: string, input: string, cwd: string, env: Record<stri
   if (result.stdout.length > 0) process.stdout.write(result.stdout);
   if (result.stderr.length > 0) process.stderr.write(result.stderr);
   return result.exitCode;
+}
+
+function classify(cwd: string, input: { prompt?: string; command?: string }): string {
+  const result = Bun.spawnSync([process.execPath, ENTRY_SURFACE], {
+    cwd,
+    stdin: new TextEncoder().encode(JSON.stringify(input)),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) return "unknown-aidlc";
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(result.stdout)) as EntryClassification;
+    return stringField(parsed.kind) ?? "unknown-aidlc";
+  } catch {
+    return "unknown-aidlc";
+  }
 }
 
 function resolveDecision(cwd: string, sessionId: string, command?: string): GateDecision {
@@ -110,14 +130,24 @@ function scopedEnvironment(context: HookIntentContext): Record<string, string> {
   };
 }
 
-const SCOPED_AIDLC_TOOL =
-  /(^|(?:&&|\|\||;|\n)\s*)(bun\s+(?:\.\/)?\.codex\/tools\/aidlc-(?:orchestrate|state|utility|runtime|audit|log|learnings)\.ts\b)/g;
+function wrappedBashCommand(command: string, env: Record<string, string>): string {
+  const encoded = Buffer.from(command, "utf-8").toString("base64url");
+  const prefix = Object.entries(env).map(([key, value]) => `${key}=${value}`).join(" ");
+  return `${prefix} bun .codex/hooks/aidlc-session-command.ts ${encoded}`;
+}
 
-function scopeBashCommand(command: string, context: HookIntentContext): string {
-  const prefix = Object.entries(scopedEnvironment(context))
-    .map(([key, value]) => `${key}=${value}`)
-    .join(" ");
-  return command.replace(SCOPED_AIDLC_TOOL, `$1${prefix} $2`);
+function isDirectAllowed(kind: string): boolean {
+  return ["bind", "create", "readonly", "workspace", "non-aidlc"].includes(kind);
+}
+
+function deny(reason: string): void {
+  process.stdout.write(`${JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: reason,
+    },
+  })}\n`);
 }
 
 export async function run(target: string, raw: string): Promise<number> {
@@ -132,21 +162,54 @@ export async function run(target: string, raw: string): Promise<number> {
   const sessionId = stringField(input.session_id);
   const command = stringField(input.tool_input?.command);
 
-  // Creation is the only Direct-mode hook path: it is an explicit workflow
-  // request, and rebuild-stage-graph binds the resulting intent atomically to
-  // this host session. Every other unbound event remains a cheap no-op.
-  if (target === "rebuild-stage-graph" && intentCreate(command)) {
+  // Compatibility fallback for older/direct creation invocations that did not
+  // receive AIDLC_CREATE_SESSION_ID. The primary path binds inside
+  // aidlc-utility after the record and state are durable.
+  if (target === "rebuild-stage-graph" && command && classify(cwd, { command }) === "create") {
     return runAdapter(target, raw, cwd, process.env);
   }
   if (!sessionId) return 0;
 
-  const decision = resolveDecision(cwd, sessionId, target === "record-human-turn" ? prompt(input) : undefined);
+  const promptText = target === "record-human-turn" ? prompt(input) : undefined;
+  const decision = resolveDecision(cwd, sessionId, promptText);
   const context = resolvedContext(decision);
-  if (decision.allow !== true || !context) return 0;
   if (target === "scope-bash-command") {
     if (!command) return 0;
-    const scoped = scopeBashCommand(command, context);
-    if (scoped === command) return 0;
+    const kind = classify(cwd, { command });
+    if (kind === "non-aidlc") return 0;
+    if (decision.action === "direct") {
+      if (!isDirectAllowed(kind)) {
+        deny("AIDLC workflow command blocked: this Codex session is Direct. Run $aidlc intent <name> first, or create a new intent.");
+        return 0;
+      }
+      if (kind !== "create" && kind !== "bind") return 0;
+      const created = wrappedBashCommand(command, kind === "create"
+        ? { AIDLC_CREATE_SESSION_ID: sessionId }
+        : { AIDLC_SELECT_SESSION_ID: sessionId });
+      process.stdout.write(`${JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "allow",
+          updatedInput: { ...input.tool_input, command: created },
+        },
+      })}\n`);
+      return 0;
+    }
+    if (kind === "unknown-aidlc") {
+      deny("AIDLC command blocked: this command form cannot be safely recognized or scoped. Use a supported AIDLC command form.");
+      return 0;
+    }
+    if (decision.action !== "bound" || !context) {
+      deny("AIDLC command could not be authorized for this session. Select a runnable intent before continuing.");
+      return 0;
+    }
+    // A birth must not inherit the old intent context: creation writes a new
+    // record and then atomically replaces this session's binding. Its explicit
+    // creation id is the authority, while all other bound operations receive
+    // the validated old intent context.
+    const scoped = wrappedBashCommand(command, kind === "create"
+      ? { AIDLC_CREATE_SESSION_ID: sessionId }
+      : scopedEnvironment(context));
     process.stdout.write(`${JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
@@ -159,6 +222,7 @@ export async function run(target: string, raw: string): Promise<number> {
     })}\n`);
     return 0;
   }
+  if (decision.action !== "bound" || !context) return 0;
   return runAdapter(target, raw, cwd, {
     ...process.env,
     ...scopedEnvironment(context),

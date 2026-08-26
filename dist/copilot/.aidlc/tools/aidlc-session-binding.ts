@@ -3,8 +3,8 @@
 // That older directory records passive lifecycle observations; a binding in
 // this file is an explicit user choice that authorizes AIDLC hook execution.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   activeSpace,
   findIntentByUuid,
@@ -14,18 +14,16 @@ import {
   stateFilePath,
   writeSessionIntentUuid,
 } from "./aidlc-lib.ts";
+import { classifyPromptEntry } from "./aidlc-entry-surface.ts";
+import {
+  clearNativeSessionBindingStore,
+  readNativeSessionBindingStore,
+  safeNativeSessionId,
+  type NativeSessionBinding,
+  writeNativeSessionBindingStore,
+} from "./aidlc-session-binding-store.ts";
 
-const BINDINGS_DIR = ".aidlc-session-bindings";
-const VERSION = 1;
-
-export interface NativeSessionBinding {
-  version: typeof VERSION;
-  sessionId: string;
-  intentUuid: string;
-  space: string;
-  intentDir: string;
-  activatedAt: string;
-}
+export type { NativeSessionBinding } from "./aidlc-session-binding-store.ts";
 
 export interface HookIntentContext {
   sessionId: string;
@@ -35,49 +33,17 @@ export interface HookIntentContext {
 }
 
 export interface SessionGateDecision {
-  allow: boolean;
+  action: "direct" | "bound" | "deny";
   reason: string;
+  recovery?: string;
   context?: HookIntentContext;
-}
-
-function safeSessionId(sessionId: string): string | null {
-  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/.test(sessionId)
-    ? sessionId
-    : null;
-}
-
-function bindingsDir(projectDir: string): string {
-  return join(projectDir, "aidlc", BINDINGS_DIR);
-}
-
-function bindingPath(projectDir: string, sessionId: string): string | null {
-  const safe = safeSessionId(sessionId);
-  return safe ? join(bindingsDir(projectDir), `${safe}.json`) : null;
-}
-
-function isBinding(value: unknown): value is NativeSessionBinding {
-  if (value === null || typeof value !== "object") return false;
-  const candidate = value as Record<string, unknown>;
-  return candidate.version === VERSION &&
-    typeof candidate.sessionId === "string" &&
-    typeof candidate.intentUuid === "string" &&
-    typeof candidate.space === "string" &&
-    typeof candidate.intentDir === "string" &&
-    typeof candidate.activatedAt === "string";
 }
 
 export function readNativeSessionBinding(
   projectDir: string,
   sessionId: string,
 ): NativeSessionBinding | null {
-  const path = bindingPath(projectDir, sessionId);
-  if (!path) return null;
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
-    return isBinding(parsed) && parsed.sessionId === sessionId ? parsed : null;
-  } catch {
-    return null;
-  }
+  return readNativeSessionBindingStore(projectDir, sessionId);
 }
 
 export function writeNativeSessionBinding(
@@ -85,23 +51,25 @@ export function writeNativeSessionBinding(
   sessionId: string,
   intentUuid: string,
 ): NativeSessionBinding | null {
-  const path = bindingPath(projectDir, sessionId);
   const resolved = findIntentByUuid(projectDir, intentUuid);
-  if (!path || !resolved) return null;
+  if (!safeNativeSessionId(sessionId) || !resolved) return null;
   const binding: NativeSessionBinding = {
-    version: VERSION,
+    version: 1,
     sessionId,
     intentUuid,
     space: resolved.space,
     intentDir: resolved.dirName,
     activatedAt: new Date().toISOString(),
   };
-  mkdirSync(bindingsDir(projectDir), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(binding)}\n`, "utf-8");
+  if (!writeNativeSessionBindingStore(projectDir, binding)) return null;
   // Keep the pre-existing lifecycle view useful for non-Codex consumers, but
   // never read it as authorization for this native gate.
   writeSessionIntentUuid(projectDir, sessionId, intentUuid);
   return binding;
+}
+
+export function clearNativeSessionBinding(projectDir: string, sessionId: string): boolean {
+  return clearNativeSessionBindingStore(projectDir, sessionId);
 }
 
 function contextForBinding(
@@ -136,16 +104,10 @@ function runnable(projectDir: string, context: HookIntentContext): boolean {
     !["true", "yes", "1"].includes(parked);
 }
 
-function explicitIntentName(command: string): string | null {
-  const match = command.trim().match(/^(?:\$aidlc|\/aidlc)\s+intent\s+([^\s]+)/i);
-  if (!match) return null;
-  const name = match[1].trim();
-  return ["create", "list", "switch"].includes(name.toLowerCase()) ? null : name;
-}
-
 function resolveExplicitIntent(projectDir: string, command: string): string | null {
-  const name = explicitIntentName(command);
-  if (!name) return null;
+  const classified = classifyPromptEntry(command);
+  if (classified.kind !== "bind" || !classified.intentName) return null;
+  const name = classified.intentName;
   const matches = listIntents(projectDir, activeSpace(projectDir)).filter(
     (intent) => intent.dirName === name || intent.slug === name,
   );
@@ -157,29 +119,29 @@ export function resolveNativeSessionGate(
   sessionId: string,
   command?: string,
 ): SessionGateDecision {
-  if (!safeSessionId(sessionId)) return { allow: false, reason: "missing-or-invalid-session" };
+  if (!safeNativeSessionId(sessionId)) return { action: "direct", reason: "missing-or-invalid-session" };
 
   const explicitUuid = command ? resolveExplicitIntent(projectDir, command) : null;
   if (explicitUuid) {
     const binding = writeNativeSessionBinding(projectDir, sessionId, explicitUuid);
     const context = binding && contextForBinding(projectDir, binding);
-    if (!context) return { allow: false, reason: "selected-intent-unavailable" };
+    if (!context) return { action: "deny", reason: "selected-intent-unavailable", recovery: "Select a runnable intent." };
     // Preserve the normal CLI's shared cursor for explicit intent commands;
     // hook subprocesses use the binding context, so another session moving it
     // cannot redirect this session's state or audit writes.
     setActiveIntentCursor(projectDir, context.intentDir, context.space);
     return runnable(projectDir, context)
-      ? { allow: true, reason: "explicit-intent", context }
-      : { allow: false, reason: "selected-intent-not-runnable", context };
+      ? { action: "bound", reason: "explicit-intent", context }
+      : { action: "deny", reason: "selected-intent-not-runnable", recovery: "Select a runnable intent.", context };
   }
 
   const binding = readNativeSessionBinding(projectDir, sessionId);
-  if (!binding) return { allow: false, reason: "direct-session" };
+  if (!binding) return { action: "direct", reason: "direct-session" };
   const context = contextForBinding(projectDir, binding);
-  if (!context) return { allow: false, reason: "stale-binding" };
+  if (!context) return { action: "direct", reason: "stale-binding" };
   return runnable(projectDir, context)
-    ? { allow: true, reason: "active-binding", context }
-    : { allow: false, reason: "bound-intent-not-runnable", context };
+    ? { action: "bound", reason: "active-binding", context }
+    : { action: "deny", reason: "bound-intent-not-runnable", recovery: "Select another runnable intent.", context };
 }
 
 interface BindingCliInput {
@@ -193,7 +155,7 @@ async function main(): Promise<void> {
   try {
     input = JSON.parse(await Bun.stdin.text()) as BindingCliInput;
   } catch {
-    process.stdout.write(`${JSON.stringify({ allow: false, reason: "invalid-input" })}\n`);
+    process.stdout.write(`${JSON.stringify({ action: "direct", reason: "invalid-input" })}\n`);
     return;
   }
   const projectDir = typeof input.projectDir === "string" ? resolve(input.projectDir) : process.cwd();

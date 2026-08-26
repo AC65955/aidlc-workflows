@@ -44,6 +44,7 @@ const manifest: HarnessManifest = {
   harnessFiles: [
     { src: "hooks/aidlc-codex-adapter.ts", dst: "hooks/aidlc-codex-adapter.ts" },
     { src: "hooks/aidlc-session-gate.ts", dst: "hooks/aidlc-session-gate.ts" },
+    { src: "hooks/aidlc-session-command.ts", dst: "hooks/aidlc-session-command.ts" },
     // Project-root .gitignore (beside .codex/, not inside it) — re-rooted under
     // aidlc/spaces/* for the workspace layout (SEED): cursors + machine-local
     // runtime ignored, the shared work (memory/codekb/registry/state/audit
