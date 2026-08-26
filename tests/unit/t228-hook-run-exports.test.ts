@@ -81,6 +81,10 @@ function adapterSubjects(): Subject[] {
         path: materializedAdapterPath("codex", "aidlc-session-gate.ts"),
       },
       {
+        name: "codex session command",
+        path: materializedAdapterPath("codex", "aidlc-session-command.ts"),
+      },
+      {
         name: "cursor adapter",
         path: materializedAdapterPath("cursor", "aidlc-cursor-adapter.ts"),
       },
@@ -102,6 +106,10 @@ function adapterSubjects(): Subject[] {
     {
       name: "codex session gate",
       path: join(REPO_ROOT, "dist", "codex", ".codex", "hooks", "aidlc-session-gate.ts"),
+    },
+    {
+      name: "codex session command",
+      path: join(REPO_ROOT, "dist", "codex", ".codex", "hooks", "aidlc-session-command.ts"),
     },
     {
       name: "cursor adapter",

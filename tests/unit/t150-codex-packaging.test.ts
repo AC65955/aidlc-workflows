@@ -147,14 +147,14 @@ describe("t150 dist/codex packaging parity + drift guard", () => {
 
   test("2: every packaged .ts file is byte-identical to its dist/claude source (code is never transformed)", () => {
     // tools/ + hooks/ carry the deterministic core. The Codex-native adapter
-    // and session gate are authored shells with no Claude counterpart; every
-    // other file must match its source byte-for-byte.
+    // and session gate/wrapper are authored shells with no Claude counterpart;
+    // every other file must match its source byte-for-byte.
     const divergent: string[] = [];
     for (const sub of ["tools", "hooks"]) {
       const dstDir = join(CODEX_DST, sub);
       for (const file of walk(dstDir)) {
         if (!file.endsWith(".ts")) continue;
-        if (/aidlc-codex-[^/]+\.ts$|aidlc-session-gate\.ts$/.test(file)) continue;
+        if (/aidlc-codex-[^/]+\.ts$|aidlc-session-(?:gate|command)\.ts$/.test(file)) continue;
         const rel = file.slice(dstDir.length + 1);
         const src = join(CLAUDE_SRC, sub, rel);
         if (!readFileSync(file).equals(readFileSync(src))) divergent.push(`${sub}/${rel}`);

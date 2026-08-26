@@ -121,6 +121,22 @@ function runShell(project: string, command: string): { code: number; stdout: str
   };
 }
 
+function resolvedIntent(project: string, env: Record<string, string>): string {
+  const result = Bun.spawnSync({
+    cmd: [
+      process.execPath,
+      "-e",
+      "import { activeIntent } from './.codex/tools/aidlc-lib.ts'; process.stdout.write(`${activeIntent(process.cwd()) ?? 'null'}\\n`);",
+    ],
+    cwd: project,
+    env: { ...process.env, ...env },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(result.exitCode).toBe(0);
+  return new TextDecoder().decode(result.stdout).trim();
+}
+
 describe("t314 Codex native session gate", () => {
   test("a fresh session remains Direct despite a globally active intent", () => {
     const project = seedProject();
@@ -134,6 +150,185 @@ describe("t314 Codex native session gate", () => {
       expect(result.stdout).toBe("");
       expect(existsSync(join(project, "aidlc", ".aidlc-session-bindings", "fresh-direct.json"))).toBe(false);
       expect(existsSync(join(project, "aidlc", ".aidlc-sessions", "codex-session.json"))).toBe(false);
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  test("a Direct session denies workflow mutations without changing the shared intent", () => {
+    const project = seedProject();
+    try {
+      const betaBefore = readFileSync(recordPath(project, BETA_DIR), "utf-8");
+      const result = runGate(project, "scope-bash-command", {
+        hook_event_name: "PreToolUse",
+        session_id: "fresh-direct",
+        tool_name: "Bash",
+        tool_input: { command: "bun .codex/tools/aidlc-orchestrate.ts next" },
+      });
+      expect(result.code).toBe(0);
+      const output = JSON.parse(result.stdout) as {
+        hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string };
+      };
+      expect(output.hookSpecificOutput?.permissionDecision).toBe("deny");
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain("$aidlc intent <name>");
+      expect(readFileSync(recordPath(project, BETA_DIR), "utf-8")).toBe(betaBefore);
+      expect(auditContent(project, BETA_DIR)).toBe("");
+
+      const nested = runGate(project, "scope-bash-command", {
+        hook_event_name: "PreToolUse",
+        session_id: "fresh-direct",
+        tool_name: "Bash",
+        tool_input: { command: "sh -c 'bun .codex/tools/aidlc-orchestrate.ts next'" },
+      });
+      expect(JSON.parse(nested.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
+
+      for (const command of [
+        "cd .codex/tools && bun aidlc-orchestrate.ts next",
+        "sh -c 'sudo bun .codex/tools/aidlc-orchestrate.ts next'",
+        "sh -c 'env -i bun .codex/tools/aidlc-orchestrate.ts next'",
+      ]) {
+        const denied = runGate(project, "scope-bash-command", {
+          hook_event_name: "PreToolUse",
+          session_id: "fresh-direct",
+          tool_name: "Bash",
+          tool_input: { command },
+        });
+        expect(JSON.parse(denied.stdout).hookSpecificOutput.permissionDecision, command).toBe("deny");
+      }
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  test("a Direct session permits ordinary Bash and atomically binds an intent-create", () => {
+    const project = seedProject();
+    try {
+      expect(runGate(project, "scope-bash-command", {
+        hook_event_name: "PreToolUse",
+        session_id: "fresh-create",
+        tool_name: "Bash",
+        tool_input: { command: "pwd" },
+      }).stdout).toBe("");
+      expect(runGate(project, "scope-bash-command", {
+        hook_event_name: "PreToolUse",
+        session_id: "fresh-create",
+        tool_name: "Bash",
+        tool_input: { command: "env -i pwd" },
+      }).stdout).toBe("");
+
+      const created = scopedBashCommand(
+        project,
+        "fresh-create",
+        "bun .codex/tools/aidlc-utility.ts intent-create --scope poc --arguments 'atomic binding'",
+      );
+      const result = runShell(project, created);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("Intent created:");
+      expect(existsSync(join(project, "aidlc", ".aidlc-session-bindings", "fresh-create.json"))).toBe(true);
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  test("a Direct shell intent switch becomes a session binding", () => {
+    const project = seedProject();
+    try {
+      const selected = runShell(project, scopedBashCommand(
+        project,
+        "fresh-selection",
+        "bun .codex/tools/aidlc-utility.ts intent switch alpha",
+      ));
+      expect(selected.code).toBe(0);
+      const binding = JSON.parse(readFileSync(
+        join(project, "aidlc", ".aidlc-session-bindings", "fresh-selection.json"),
+        "utf-8",
+      )) as { intentUuid: string; intentDir: string };
+      expect(binding).toEqual(expect.objectContaining({ intentUuid: ALPHA_UUID, intentDir: ALPHA_DIR }));
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  test("a bound intent-create receives structural birth context and replaces the old binding", () => {
+    const project = seedProject();
+    try {
+      expect(runGate(project, "record-human-turn", {
+        hook_event_name: "UserPromptSubmit",
+        session_id: "bound-birth",
+        prompt: "$aidlc intent alpha",
+      }).code).toBe(0);
+      const created = scopedBashCommand(
+        project,
+        "bound-birth",
+        "bun .codex/tools/aidlc-utility.ts intent-create --scope poc --arguments 'bound birth'",
+      );
+      expect(created).toContain("AIDLC_CREATE_SESSION_ID=bound-birth");
+      expect(created).not.toContain("AIDLC_HOOK_INTENT_DIR=");
+      const result = runShell(project, created);
+      expect(result.code).toBe(0);
+      const binding = JSON.parse(readFileSync(
+        join(project, "aidlc", ".aidlc-session-bindings", "bound-birth.json"),
+        "utf-8",
+      )) as { intentUuid: string; intentDir: string };
+      expect(binding.intentUuid).not.toBe(ALPHA_UUID);
+      expect(binding.intentDir).not.toBe(ALPHA_DIR);
+      expect(result.stdout).toContain(binding.intentDir);
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  test("Direct next --status is allowed unchanged while Bound status is scoped", () => {
+    const project = seedProject();
+    try {
+      const status = "bun .codex/tools/aidlc-orchestrate.ts next --status";
+      const direct = runGate(project, "scope-bash-command", {
+        hook_event_name: "PreToolUse",
+        session_id: "fresh-status",
+        tool_name: "Bash",
+        tool_input: { command: status },
+      });
+      expect(direct.code).toBe(0);
+      expect(direct.stdout).toBe("");
+
+      expect(runGate(project, "record-human-turn", {
+        hook_event_name: "UserPromptSubmit",
+        session_id: "bound-status",
+        prompt: "$aidlc intent alpha",
+      }).code).toBe(0);
+      const scoped = scopedBashCommand(project, "bound-status", status);
+      expect(scoped).toContain(`AIDLC_HOOK_INTENT_DIR=${ALPHA_DIR}`);
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  test("a bound session permits registered testing and graph tools through the wrapper", () => {
+    const project = seedProject();
+    try {
+      expect(runGate(project, "record-human-turn", {
+        hook_event_name: "UserPromptSubmit",
+        session_id: "bound-tools",
+        prompt: "$aidlc intent alpha",
+      }).code).toBe(0);
+      for (const command of [
+        "bun .codex/tools/aidlc-testing-posture.ts render",
+        "bun .codex/tools/aidlc-graph.ts compile",
+      ]) {
+        const scoped = scopedBashCommand(project, "bound-tools", command);
+        expect(scoped).toContain(`AIDLC_HOOK_INTENT_DIR=${ALPHA_DIR}`);
+      }
+      const unsupported = runGate(project, "scope-bash-command", {
+        hook_event_name: "PreToolUse",
+        session_id: "bound-tools",
+        tool_name: "Bash",
+        tool_input: { command: "bun .codex/tools/aidlc-unknown.ts run" },
+      });
+      const output = JSON.parse(unsupported.stdout) as {
+        hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string };
+      };
+      expect(output.hookSpecificOutput?.permissionDecision).toBe("deny");
+      expect(output.hookSpecificOutput?.permissionDecisionReason).toContain("cannot be safely recognized or scoped");
     } finally {
       rmSync(project, { recursive: true, force: true });
     }
@@ -153,6 +348,21 @@ describe("t314 Codex native session gate", () => {
         "utf-8",
       )) as { intentUuid: string; intentDir: string };
       expect(binding).toEqual(expect.objectContaining({ intentUuid: ALPHA_UUID, intentDir: ALPHA_DIR }));
+
+      // A matching hook context is scoped, but a forged UUID/dir pair must
+      // not override the cursor merely because it is present in the process
+      // environment.
+      writeFileSync(
+        join(project, "aidlc", "spaces", "default", "intents", "active-intent"),
+        `${ALPHA_DIR}\n`,
+        "utf-8",
+      );
+      expect(resolvedIntent(project, {
+        AIDLC_HOOK_SESSION_ID: "bound-alpha",
+        AIDLC_HOOK_INTENT_UUID: BETA_UUID,
+        AIDLC_HOOK_INTENT_SPACE: "default",
+        AIDLC_HOOK_INTENT_DIR: BETA_DIR,
+      })).toBe(ALPHA_DIR);
 
       // The selection updates the shared cursor, then a different session moves
       // it to beta. The original session's hook context must still be alpha.
@@ -233,7 +443,7 @@ describe("t314 Codex native session gate", () => {
       const nextCommand = scopedBashCommand(
         project,
         "bound-alpha-engine",
-        "bun .codex/tools/aidlc-orchestrate.ts next",
+        "sh -c 'bun .codex/tools/aidlc-orchestrate.ts next'",
       );
       expect(nextCommand).toContain("AIDLC_HOOK_INTENT_DIR=" + ALPHA_DIR);
       const next = runShell(project, nextCommand);
@@ -273,6 +483,52 @@ describe("t314 Codex native session gate", () => {
       expect(alphaAuditAfter).not.toBe(alphaAuditBefore);
       expect(alphaAuditAfter).toContain("**Event**: STAGE_SKIPPED");
       expect(auditContent(project, BETA_DIR)).toBe("");
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  test("a bound session scopes jump and returns Direct after a space operation", () => {
+    const project = seedProject();
+    try {
+      const construction = readFileSync(
+        join(REPO_ROOT, "tests", "fixtures", "state-construction-bolt1.md"),
+        "utf-8",
+      ).replace("- [ ] functional-design — EXECUTE", "- [-] functional-design — EXECUTE");
+      writeFileSync(recordPath(project, ALPHA_DIR), construction, "utf-8");
+      writeFileSync(recordPath(project, BETA_DIR), construction, "utf-8");
+      expect(runGate(project, "record-human-turn", {
+        hook_event_name: "UserPromptSubmit",
+        session_id: "bound-jump",
+        prompt: "$aidlc intent alpha",
+      }).code).toBe(0);
+      writeFileSync(join(project, "aidlc", "spaces", "default", "intents", "active-intent"), `${BETA_DIR}\n`, "utf-8");
+
+      const alphaAuditBefore = auditContent(project, ALPHA_DIR);
+      const jumped = runShell(project, scopedBashCommand(
+        project,
+        "bound-jump",
+        "bun .codex/tools/aidlc-jump.ts execute --target functional-design --direction redo --scope feature",
+      ));
+      expect(jumped.code).toBe(0);
+      expect(auditContent(project, ALPHA_DIR)).not.toBe(alphaAuditBefore);
+      expect(auditContent(project, ALPHA_DIR)).toContain("**Event**: STAGE_JUMPED");
+      expect(auditContent(project, BETA_DIR)).toBe("");
+
+      const switched = runShell(project, scopedBashCommand(
+        project,
+        "bound-jump",
+        "bun .codex/tools/aidlc-utility.ts space default",
+      ));
+      expect(switched.code).toBe(0);
+      expect(existsSync(join(project, "aidlc", ".aidlc-session-bindings", "bound-jump.json"))).toBe(false);
+      const denied = runGate(project, "scope-bash-command", {
+        hook_event_name: "PreToolUse",
+        session_id: "bound-jump",
+        tool_name: "Bash",
+        tool_input: { command: "bun .codex/tools/aidlc-orchestrate.ts next" },
+      });
+      expect(JSON.parse(denied.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
     } finally {
       rmSync(project, { recursive: true, force: true });
     }
