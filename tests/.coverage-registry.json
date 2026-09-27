@@ -20,9 +20,9 @@
     "render-surface": "tui"
   },
   "counts": {
-    "total": 1155,
+    "total": 1157,
     "enumeratedByClass": {
-      "function": 829,
+      "function": 831,
       "audit": 105,
       "scope": 11,
       "stage": 33,
@@ -31,7 +31,7 @@
       "render-surface": 7
     },
     "coveredByClass": {
-      "function": 495,
+      "function": 497,
       "audit": 66,
       "scope": 11,
       "stage": 11,
@@ -1321,6 +1321,13 @@
     {
       "unitClass": "function",
       "unitId": "function:_resetStageGraphForTests",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:_resetWorkspaceSourceStateCacheForTests",
       "minMechanism": "none",
       "coveredBy": [],
       "status": "UNCOVERED"
@@ -9491,6 +9498,22 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:withWorkspaceSourceStateCache",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t-brownfield-source-walk-cache.test.ts",
+          "mechanism": "none"
+        },
+        {
+          "file": "tests/unit/t314-source-freshness-receipts.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:WORKSPACE_LOCK_SENTINEL",
       "minMechanism": "none",
       "coveredBy": [],
@@ -9569,6 +9592,10 @@
       "minMechanism": "none",
       "coveredBy": [
         {
+          "file": "tests/unit/t-brownfield-source-walk-cache.test.ts",
+          "mechanism": "none"
+        },
+        {
           "file": "tests/unit/t314-source-freshness-receipts.test.ts",
           "mechanism": "cli"
         }
@@ -9580,6 +9607,10 @@
       "unitId": "function:workspaceSourceListing",
       "minMechanism": "none",
       "coveredBy": [
+        {
+          "file": "tests/unit/t-brownfield-source-walk-cache.test.ts",
+          "mechanism": "none"
+        },
         {
           "file": "tests/unit/t305-per-unit-attribution-receipts.test.ts",
           "mechanism": "cli"
@@ -9610,8 +9641,13 @@
       "unitClass": "function",
       "unitId": "function:workspaceSourceState",
       "minMechanism": "none",
-      "coveredBy": [],
-      "status": "UNCOVERED"
+      "coveredBy": [
+        {
+          "file": "tests/unit/t-brownfield-source-walk-cache.test.ts",
+          "mechanism": "none"
+        }
+      ],
+      "status": "covered"
     },
     {
       "unitClass": "function",
@@ -12652,6 +12688,10 @@
           "mechanism": "cli"
         },
         {
+          "file": "tests/unit/t314-source-freshness-receipts.test.ts",
+          "mechanism": "cli"
+        },
+        {
           "file": "tests/unit/t335-change-control-review-summary.test.ts",
           "mechanism": "cli"
         }
@@ -12793,6 +12833,10 @@
       "coveredBy": [
         {
           "file": "tests/unit/t17.test.ts",
+          "mechanism": "cli"
+        },
+        {
+          "file": "tests/unit/t314-source-freshness-receipts.test.ts",
           "mechanism": "cli"
         }
       ],
