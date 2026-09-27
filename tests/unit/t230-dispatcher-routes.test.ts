@@ -1959,7 +1959,16 @@ describe("t230 native review-brief dispatch", () => {
         expect(output).toContain("**Request changes**");
       } else {
         expect(output).toContain(`**Review artifact:** \`${artifact}\``);
-        expect(output).toContain(finding);
+        if (command === "context") {
+          // The reviewer re-checks the open finding, with no status column
+          // and an empty human reason.
+          expect(output).toContain("**Open findings to re-check**");
+          expect(output).toContain(
+            `| R-01 | Minor | ${artifact} > FR-1 | Deadline is missing | Add a delivery date |  |`,
+          );
+        } else {
+          expect(output).toContain(finding);
+        }
         if (command === "review") {
           expect(output).toContain("**Stage:** Requirements Analysis");
           expect(output).toContain("**Review outcome:** Concerns remain for your decision.");

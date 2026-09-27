@@ -20,9 +20,9 @@
     "render-surface": "tui"
   },
   "counts": {
-    "total": 1166,
+    "total": 1170,
     "enumeratedByClass": {
-      "function": 840,
+      "function": 844,
       "audit": 105,
       "scope": 11,
       "stage": 33,
@@ -31,7 +31,7 @@
       "render-surface": 7
     },
     "coveredByClass": {
-      "function": 506,
+      "function": 510,
       "audit": 66,
       "scope": 11,
       "stage": 11,
@@ -5608,6 +5608,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:pairedReviewCompletions",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t304-review-brief.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:pairedReviewRecordForCompletion",
       "minMechanism": "none",
       "coveredBy": [
@@ -5913,6 +5925,18 @@
       "coveredBy": [
         {
           "file": "tests/unit/t248-codekb-scope-diff.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:parseReviewerFindingsReport",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t304-review-brief.test.ts",
           "mechanism": "cli"
         }
       ],
@@ -7518,6 +7542,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:REVIEW_FINDINGS_REPORT_RETRY_MESSAGE",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t304-review-brief.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:REVIEW_RECORD_DIGEST_RE",
       "minMechanism": "none",
       "coveredBy": [],
@@ -7785,6 +7821,18 @@
       "coveredBy": [
         {
           "file": "tests/unit/t331-guard-deadlock-liveness.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:reviewRecordDerivedFindings",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t304-review-brief.test.ts",
           "mechanism": "cli"
         }
       ],
