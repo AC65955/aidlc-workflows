@@ -255,11 +255,16 @@ default** — no log is written and there is no overhead on a normal run. Two
 ways to enable it, either works:
 
 - **Filesystem marker (easiest on Kiro IDE):** `touch aidlc/.aidlc-hook-debug`
+  (in PowerShell, `New-Item -ItemType File aidlc/.aidlc-hook-debug`)
   in your project. It takes effect on the very next hook fire — no IDE restart —
   and `rm aidlc/.aidlc-hook-debug` turns it back off.
 - **Environment variable:** `export AIDLC_HOOK_DEBUG=1`. Because the IDE runs
   hooks in non-interactive shells, set it where those shells read it — add the
   export to `~/.zshenv` (zsh) or `~/.bashrc` (bash), then restart the IDE.
+  On Windows, set it as a user variable in PowerShell instead,
+  `[Environment]::SetEnvironmentVariable("AIDLC_HOOK_DEBUG", "1", "User")`,
+  then quit and reopen the IDE (run it again with `$null` in place of `"1"` to
+  turn it off).
 
 ## What's different on Kiro
 
@@ -283,6 +288,34 @@ A project's `aidlc/` workspace is harness-neutral. Moving a project between
 harnesses (or running both side by side) is supported-but-untested; `/aidlc
 --doctor` will warn if it detects a conflicting harness setup with an active
 workflow.
+
+### Kiro memories carry old AI-DLC advice
+
+Kiro IDE keeps memories outside your project, in `.kiro/memories/memories.db`
+under your home folder (`%USERPROFILE%\.kiro\memories\memories.db` on Windows),
+and can load them into every workspace you open. A memory an agent saved during
+an earlier AI-DLC run can hold a diagnosis or workaround that only fit that
+project and version, and is wrong or unsafe anywhere else: running a hook
+command such as `record-human-turn` by hand, setting
+`AIDLC_SKIP_HUMAN_PRESENCE_GUARD=1`, turning summary confirmation off, or
+calling Kiro IDE a "sessionless" harness. AI-DLC tells the agent never to save
+such advice and never to act on it, but memories saved before that still load.
+
+If the agent says "per my memory" and suggests one of these, or tells you to
+resume "from Kiro IDE" while you are already in it:
+
+1. Tell it to ignore that memory and follow what `/aidlc` says now. Guards and
+   checkpoints are yours to switch: the agent names the command, you type it.
+2. Delete only the memories that give that kind of advice: running an AI-DLC
+   hook command by hand, setting a variable that skips a guard, turning a
+   checkpoint off, calling Kiro IDE "sessionless", or telling you to resume
+   from Kiro IDE while you are already in it. Keep the rest, including accurate
+   Kiro IDE notes (for example that it has no status line), other AI-DLC notes,
+   and debug tips such as `AIDLC_HOOK_DEBUG` (check Kiro's documentation for
+   managing memories).
+3. Keep a copy of `memories.db` before you delete anything, and close Kiro IDE
+   first if you edit the file directly: it holds all of Kiro's memories, not
+   only the AI-DLC ones.
 
 ## For framework developers
 
