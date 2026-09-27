@@ -10000,6 +10000,10 @@
         {
           "file": "tests/unit/t228-hook-run-exports.test.ts",
           "mechanism": "cli"
+        },
+        {
+          "file": "tests/unit/t230-dispatcher-routes.test.ts",
+          "mechanism": "cli"
         }
       ],
       "status": "covered"
