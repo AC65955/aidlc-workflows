@@ -278,6 +278,13 @@ function Get-LogCopyFailure($Failure, [string]$Operation, [string]$Path, [string
     return [ordered]@{ operation = $Operation; relativePath = $relative; exceptions = $exceptions }
 }
 
+# A retained fixture holds files the agent made: its links are listed, never followed or copied.
+function Add-OmittedLink([hashtable]$Diagnostic, [string]$Path) {
+    if ($null -eq $Diagnostic -or -not $Diagnostic.ContainsKey('omitted')) { return }
+    $Diagnostic.omittedCount++
+    if ($Diagnostic.omitted.Count -lt 20) { $Diagnostic.omitted.Add((Get-LogRelativePath $Path $Diagnostic.root)) }
+}
+
 function Copy-PlainTree([string]$Source, [string]$Destination, [switch]$Checkout, [switch]$RejectLinks, [hashtable]$Diagnostic, [switch]$RetainedFixture) {
     $operation = 'inspect-source'
     $observed = $Source
@@ -297,6 +304,8 @@ function Copy-PlainTree([string]$Source, [string]$Destination, [switch]$Checkout
             if ($Checkout -and ($name -match '^(\.git|\.aws|\.ssh|\.azure|\.config|\.npmrc|\.netrc|_netrc|\.pypirc|\.env(?:\..*)?)$')) { continue }
             $attributes = [IO.File]::GetAttributes($entry)
             if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                # A Bun cache junction in a retained Codex fixture (run 36332601958).
+                if ($RejectLinks -and $RetainedFixture) { Add-OmittedLink $Diagnostic $entry; continue }
                 if ($RejectLinks) { throw 'Refusing linked log evidence.' }
                 continue
             }
@@ -319,10 +328,7 @@ function Copy-PlainTree([string]$Source, [string]$Destination, [switch]$Checkout
                     if ($RejectLinks -and $RetainedFixture) {
                         # Never copy bytes shared with another name; list the omission.
                         $copy = [AidlcFileBoundary]::HasSingleLink($sourceStream)
-                        if (-not $copy -and $null -ne $Diagnostic -and $Diagnostic.ContainsKey('omitted')) {
-                            $Diagnostic.omittedCount++
-                            if ($Diagnostic.omitted.Count -lt 20) { $Diagnostic.omitted.Add((Get-LogRelativePath $entry $Diagnostic.root)) }
-                        }
+                        if (-not $copy) { Add-OmittedLink $Diagnostic $entry }
                     } elseif ($RejectLinks) { [AidlcFileBoundary]::RequireSingleLink($sourceStream) }
                     if ($copy) {
                         $operation = 'copy-bytes'
@@ -423,7 +429,7 @@ function Collect-RuntimeLogs {
                 $created = $false
                 $record.complete = $true
                 if ($diagnostic.omittedCount -gt 0) {
-                    $record['omittedLinkedFiles'] = [ordered]@{ count = $diagnostic.omittedCount; paths = @($diagnostic.omitted) }
+                    $record['omittedLinks'] = [ordered]@{ count = $diagnostic.omittedCount; paths = @($diagnostic.omitted) }
                 }
             }
         } catch {
