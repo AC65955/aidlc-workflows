@@ -9979,6 +9979,10 @@
         {
           "file": "tests/unit/t-brownfield-source-walk-cache.test.ts",
           "mechanism": "none"
+        },
+        {
+          "file": "tests/unit/t400-byproduct-files-excluded-from-source-fingerprint.test.ts",
+          "mechanism": "none"
         }
       ],
       "status": "covered"
