@@ -20,23 +20,23 @@
     "render-surface": "tui"
   },
   "counts": {
-    "total": 1188,
+    "total": 1200,
     "enumeratedByClass": {
-      "function": 862,
-      "audit": 105,
+      "function": 872,
+      "audit": 106,
       "scope": 11,
       "stage": 33,
       "hook": 19,
-      "subcommand": 151,
+      "subcommand": 152,
       "render-surface": 7
     },
     "coveredByClass": {
-      "function": 528,
+      "function": 536,
       "audit": 67,
       "scope": 11,
       "stage": 11,
       "hook": 18,
-      "subcommand": 138,
+      "subcommand": 139,
       "render-surface": 7
     }
   },
@@ -694,6 +694,13 @@
     {
       "unitClass": "audit",
       "unitId": "SCOPE_DETECTED",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "audit",
+      "unitId": "SCOPE_SAVED",
       "minMechanism": "none",
       "coveredBy": [],
       "status": "UNCOVERED"
@@ -1607,6 +1614,13 @@
     {
       "unitClass": "function",
       "unitId": "function:artifactsRegistryFor",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:asReviewClass",
       "minMechanism": "none",
       "coveredBy": [],
       "status": "UNCOVERED"
@@ -2627,6 +2641,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:composedPlanLabel",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:composeMarkerPath",
       "minMechanism": "none",
       "coveredBy": [],
@@ -2799,6 +2825,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:creationSettingsFor",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t349-composer-scope-settings.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:CURRENT_SESSION_FILE",
       "minMechanism": "none",
       "coveredBy": [],
@@ -2893,6 +2931,18 @@
       "minMechanism": "none",
       "coveredBy": [],
       "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:customPlanBase",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
     },
     {
       "unitClass": "function",
@@ -3466,6 +3516,18 @@
       "minMechanism": "none",
       "coveredBy": [],
       "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:firstPlannedStageOfPhase",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
     },
     {
       "unitClass": "function",
@@ -5309,18 +5371,6 @@
     },
     {
       "unitClass": "function",
-      "unitId": "function:matchedCreationSettings",
-      "minMechanism": "none",
-      "coveredBy": [
-        {
-          "file": "tests/unit/t349-composer-scope-settings.test.ts",
-          "mechanism": "cli"
-        }
-      ],
-      "status": "covered"
-    },
-    {
-      "unitClass": "function",
       "unitId": "function:matchSubagentInflight",
       "minMechanism": "none",
       "coveredBy": [
@@ -6224,6 +6274,13 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:PLAN_FIELD",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:PLAN_SOURCE_DRIFT_ATTEMPT",
       "minMechanism": "none",
       "coveredBy": [],
@@ -6271,6 +6328,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:planChangesBetween",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:planFilePath",
       "minMechanism": "none",
       "coveredBy": [],
@@ -6283,6 +6352,18 @@
       "coveredBy": [
         {
           "file": "tests/unit/t331-guard-deadlock-liveness.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:planWithChanges",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
           "mechanism": "cli"
         }
       ],
@@ -8182,6 +8263,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:saveComposedScope",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:scalarField",
       "minMechanism": "none",
       "coveredBy": [
@@ -8781,6 +8874,18 @@
       "coveredBy": [
         {
           "file": "tests/unit/t147-kiro-hook-adapter.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:splitSlugList",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
           "mechanism": "cli"
         }
       ],
@@ -10212,6 +10317,18 @@
       "coveredBy": [
         {
           "file": "tests/integration/t325-team-unit-claims.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:writeCompiledGraphLocked",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
           "mechanism": "cli"
         }
       ],
@@ -12110,6 +12227,10 @@
         },
         {
           "file": "tests/unit/t349-composer-scope-settings.test.ts",
+          "mechanism": "cli"
+        },
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
           "mechanism": "cli"
         }
       ],
@@ -14131,6 +14252,10 @@
         {
           "file": "tests/unit/t349-composer-scope-settings.test.ts",
           "mechanism": "cli"
+        },
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
+          "mechanism": "cli"
         }
       ],
       "status": "covered"
@@ -14235,6 +14360,10 @@
         {
           "file": "tests/unit/t232-phase-progress-flip.test.ts",
           "mechanism": "cli"
+        },
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
+          "mechanism": "cli"
         }
       ],
       "status": "covered"
@@ -14297,7 +14426,23 @@
           "mechanism": "cli"
         },
         {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
+          "mechanism": "cli"
+        },
+        {
           "file": "tests/unit/t36.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "subcommand",
+      "unitId": "aidlc-utility scope-save",
+      "minMechanism": "cli",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
           "mechanism": "cli"
         }
       ],
@@ -14465,6 +14610,10 @@
         },
         {
           "file": "tests/unit/t338-ceremony-verb.test.ts",
+          "mechanism": "cli"
+        },
+        {
+          "file": "tests/unit/t351-composer-unsaved-plans.test.ts",
           "mechanism": "cli"
         },
         {
