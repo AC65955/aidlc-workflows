@@ -20,9 +20,9 @@
     "render-surface": "tui"
   },
   "counts": {
-    "total": 1171,
+    "total": 1178,
     "enumeratedByClass": {
-      "function": 845,
+      "function": 852,
       "audit": 105,
       "scope": 11,
       "stage": 33,
@@ -31,7 +31,7 @@
       "render-surface": 7
     },
     "coveredByClass": {
-      "function": 512,
+      "function": 519,
       "audit": 67,
       "scope": 11,
       "stage": 11,
@@ -4316,6 +4316,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:intentStartedByQuestion",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/integration/t171-creation-gate-registry.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:intentUuidForSelection",
       "minMechanism": "none",
       "coveredBy": [],
@@ -5005,6 +5017,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:listUnlistedIntentRecord",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/integration/t171-creation-gate-registry.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:literalOrchestrateVerb",
       "minMechanism": "none",
       "coveredBy": [
@@ -5450,6 +5474,18 @@
         {
           "file": "tests/unit/t160-workspace-record-resolution.test.ts",
           "mechanism": "none"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:mintIntentRecord",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/integration/t171-creation-gate-registry.test.ts",
+          "mechanism": "cli"
         }
       ],
       "status": "covered"
@@ -6995,6 +7031,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:registerIntentRecord",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/integration/t171-creation-gate-registry.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:relativeCodekbDir",
       "minMechanism": "none",
       "coveredBy": [
@@ -8171,6 +8219,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:selectIntentForSession",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/integration/t171-creation-gate-registry.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:selectionAwareDefaultScope",
       "minMechanism": "none",
       "coveredBy": [
@@ -8431,6 +8491,18 @@
       "minMechanism": "none",
       "coveredBy": [],
       "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:shellArg",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/integration/t171-creation-gate-registry.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
     },
     {
       "unitClass": "function",
@@ -9415,6 +9487,18 @@
       "minMechanism": "none",
       "coveredBy": [],
       "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:unlistedRecordForQuestion",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/integration/t171-creation-gate-registry.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
     },
     {
       "unitClass": "function",
