@@ -20,9 +20,9 @@
     "render-surface": "tui"
   },
   "counts": {
-    "total": 1179,
+    "total": 1184,
     "enumeratedByClass": {
-      "function": 853,
+      "function": 858,
       "audit": 105,
       "scope": 11,
       "stage": 33,
@@ -31,7 +31,7 @@
       "render-surface": 7
     },
     "coveredByClass": {
-      "function": 520,
+      "function": 525,
       "audit": 67,
       "scope": 11,
       "stage": 11,
@@ -6205,6 +6205,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:PLAN_APPROVAL_ASK_TYPE",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t-plan-approval-ask.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:PLAN_SOURCE_DRIFT_ATTEMPT",
       "minMechanism": "none",
       "coveredBy": [],
@@ -6233,6 +6245,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:planApprovalRuntimeFile",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t-plan-approval-ask.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:planApprovalRuntimeHasReceiptForMarker",
       "minMechanism": "none",
       "coveredBy": [],
@@ -6251,11 +6275,7 @@
       "minMechanism": "none",
       "coveredBy": [
         {
-          "file": "tests/integration/t-guard-native-remedies.test.ts",
-          "mechanism": "cli"
-        },
-        {
-          "file": "tests/unit/t334-change-control-plan-approval.test.ts",
+          "file": "tests/unit/t331-guard-deadlock-liveness.test.ts",
           "mechanism": "cli"
         }
       ],
@@ -6622,6 +6642,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:readPlanApprovalRuntimeRecord",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t-plan-approval-ask.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:readPlanApprovalViolation",
       "minMechanism": "none",
       "coveredBy": [
@@ -6860,7 +6892,7 @@
       "minMechanism": "none",
       "coveredBy": [
         {
-          "file": "tests/unit/t334-change-control-plan-approval.test.ts",
+          "file": "tests/unit/t331-guard-deadlock-liveness.test.ts",
           "mechanism": "cli"
         }
       ],
@@ -7124,6 +7156,18 @@
       "minMechanism": "none",
       "coveredBy": [],
       "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:removePlanApprovalRuntimeRecord",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t-plan-approval-ask.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
     },
     {
       "unitClass": "function",
@@ -8522,7 +8566,7 @@
       "minMechanism": "none",
       "coveredBy": [
         {
-          "file": "tests/unit/t334-change-control-plan-approval.test.ts",
+          "file": "tests/unit/t331-guard-deadlock-liveness.test.ts",
           "mechanism": "cli"
         }
       ],
@@ -8804,7 +8848,7 @@
       "minMechanism": "none",
       "coveredBy": [
         {
-          "file": "tests/unit/t334-change-control-plan-approval.test.ts",
+          "file": "tests/unit/t331-guard-deadlock-liveness.test.ts",
           "mechanism": "cli"
         }
       ],
@@ -10242,6 +10286,18 @@
       "minMechanism": "none",
       "coveredBy": [],
       "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:writePlanApprovalRuntimeRecord",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t-plan-approval-ask.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
     },
     {
       "unitClass": "function",
