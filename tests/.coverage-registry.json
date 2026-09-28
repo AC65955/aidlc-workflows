@@ -4778,7 +4778,7 @@
       "coveredBy": [
         {
           "file": "tests/unit/t241-opencode-adapter.test.ts",
-          "mechanism": "none"
+          "mechanism": "cli"
         }
       ],
       "status": "covered"
@@ -10577,7 +10577,7 @@
         },
         {
           "file": "tests/unit/t241-opencode-adapter.test.ts",
-          "mechanism": "none"
+          "mechanism": "cli"
         },
         {
           "file": "tests/unit/t349-engine-error-relay.test.ts",

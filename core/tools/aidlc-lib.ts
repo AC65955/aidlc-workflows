@@ -3810,7 +3810,7 @@ export interface PlanApprovalOverrideRequest {
   intentId: string;
 }
 
-export type GuardSwitchKey = "guard-policy" | `guard.${SwitchableGuardFence}`;
+export type GuardSwitchKey = "guard-policy" | `guard.${SwitchableGuardFence}` | "summary-confirmation";
 export interface GuardSwitch {
   key: GuardSwitchKey;
   value: "relaxed" | "off";
@@ -31476,13 +31476,19 @@ export function setGuardPolicyLine(content: string, line: string): string {
 
 function changeControlSourceFromLabel(label: string): string {
   if (label === "set by you" || label === "you") return "you";
+  if (label === "set by a command") return "command";
   const from = /^from\s+(.+)$/.exec(label);
   return from ? from[1].trim() : label || "you";
 }
 
-/** The label rendered after the value: `from scope classic`, `from project.md`, `set by you`, `not set`. */
+/**
+ * The label rendered after the value: `from scope classic`, `from project.md`,
+ * `set by you` (the person's typed switch), `set by a command` (an explicit
+ * setter with no typed turn behind it), `not set`.
+ */
 export function changeControlSourceLabel(source: string): string {
   if (source === "not set") return source;
+  if (source === "command") return "set by a command";
   return source === "you" ? "set by you" : `from ${source}`;
 }
 
@@ -31820,7 +31826,9 @@ export function fencesLoweredByPolicy(policy: GuardPolicy): readonly GuardFence[
 // confirmation words guard policy relaxed (also hyphenated, change control, or
 // off).
 // Strip trailing prompt punctuation and match case-insensitively. strict and
-// on never switch; human presence has no switch. Last value wins per key.
+// on never switch; human presence has no switch. summary-confirmation off
+// switches because it removes the person's checkpoint, but only from a command
+// that carries settings alone. Last value wins per key.
 const TYPED_INTENT_SETTING_KEYS = new Set([
   "depth",
   "test-strategy",
@@ -31872,6 +31880,7 @@ export function parseTypedGuardSwitchRequest(prompt: string): {
   let scope: string | null = null;
   const error: string | null = null;
   let guardPolicySpelling: "guard-policy" | "change-control" | null = null;
+  let described = false;
   let index = configForm ? 2 : 0;
   if (configForm && tokens.length < 4) {
     return { switches: [], settings: [], space: null, intent: null, scope: null, error: null };
@@ -31879,7 +31888,10 @@ export function parseTypedGuardSwitchRequest(prompt: string): {
 
   while (index < tokens.length) {
     const token = tokens[index++];
-    if (!configForm && token === "--") break;
+    if (!configForm && token === "--") {
+      described = index < tokens.length;
+      break;
+    }
     const configKey = (
       configForm && index === 3
         ? token
@@ -31888,7 +31900,10 @@ export function parseTypedGuardSwitchRequest(prompt: string): {
           : null
     )?.toLowerCase() ?? null;
     if (configKey === null) {
-      if (!configForm) continue;
+      if (!configForm) {
+        described = true;
+        continue;
+      }
       return { switches: [], settings: [], space: null, intent: null, scope: null, error: null };
     }
     const value = tokens[index] !== undefined && !tokens[index].startsWith("--")
@@ -31935,6 +31950,13 @@ export function parseTypedGuardSwitchRequest(prompt: string): {
     let key: GuardSwitchKey;
     if (currentKey === "guard-policy") {
       key = "guard-policy";
+    } else if (currentKey === "summary-confirmation") {
+      // The last value wins, so a later on drops an earlier off.
+      if (normalizedValue !== "off") {
+        switches.delete("summary-confirmation");
+        continue;
+      }
+      key = "summary-confirmation";
     } else {
       if (!currentKey.startsWith("guard.")) continue;
       const fence = currentKey.slice("guard.".length);
@@ -31944,6 +31966,13 @@ export function parseTypedGuardSwitchRequest(prompt: string): {
     if (normalizedValue === "relaxed" || normalizedValue === "off") {
       switches.set(key, { key, value: normalizedValue });
     }
+  }
+  // Beside a description, summary confirmation off could land on the active
+  // piece of work before the new-work offer, or the message may be a question
+  // about the flag. Either way it is not the person's switch at prompt time.
+  if (described && settings.get("summary-confirmation") === "off") {
+    switches.delete("summary-confirmation");
+    settings.delete("summary-confirmation");
   }
   return {
     switches: [...switches.values()],
@@ -31965,6 +31994,9 @@ export function guardSwitchRefusal(
 ): string {
   const hint = humanTurnMintAllowed() ? "" : unattendedHumanPresenceHint();
   const entry = entrySkillInvocation();
+  if (wanted.key === "summary-confirmation") {
+    return `Turning summary confirmation off skips the person's \`Looks correct\` check before a stage writes its output, so only they can do it. Ask the user to type \`${entry} config set summary-confirmation off\` themselves; this command does not turn it off on its own.${hint}`;
+  }
   if (wanted.key !== "guard-policy") {
     const fence = wanted.key.slice("guard.".length);
     return `Turning the ${fence} check off is the person's move: they type \`${entry} config set guard.${fence} off\` and the harness applies it as they say it. This command does not lower a fence on its own.${hint}`;
