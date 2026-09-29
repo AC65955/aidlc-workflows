@@ -20,9 +20,9 @@
     "render-surface": "tui"
   },
   "counts": {
-    "total": 1207,
+    "total": 1214,
     "enumeratedByClass": {
-      "function": 879,
+      "function": 886,
       "audit": 106,
       "scope": 11,
       "stage": 33,
@@ -31,7 +31,7 @@
       "render-surface": 7
     },
     "coveredByClass": {
-      "function": 538,
+      "function": 542,
       "audit": 67,
       "scope": 11,
       "stage": 11,
@@ -2967,6 +2967,44 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:DECISION_CLOSING_EVENTS",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t351-decision-closer-parity.test.ts",
+          "mechanism": "none"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:DECISION_GATE_ANSWER_EVENTS",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:DECISION_PAIRING_EVENTS",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:decisionAnsweredBy",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t351-decision-closer-parity.test.ts",
+          "mechanism": "none"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:decodeHarnessPlainText",
       "minMechanism": "none",
       "coveredBy": [
@@ -3684,6 +3722,13 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:GATE_ANSWERED_DECISION_CHECKPOINTS",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:getField",
       "minMechanism": "none",
       "coveredBy": [],
@@ -4118,6 +4163,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:hasCurrentSharedGuardRecoveryWait",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/integration/t121-stop-hook-enforce.test.ts",
+          "mechanism": "cli"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:hasCurrentSharedResumeWait",
       "minMechanism": "none",
       "coveredBy": [
@@ -4147,6 +4204,14 @@
       "coveredBy": [
         {
           "file": "tests/integration/t121-stop-hook-enforce.test.ts",
+          "mechanism": "cli"
+        },
+        {
+          "file": "tests/unit/t342-construction-checkpoint-routing.test.ts",
+          "mechanism": "cli"
+        },
+        {
+          "file": "tests/unit/t343-swarm-checkpoints.test.ts",
           "mechanism": "cli"
         }
       ],
@@ -5688,6 +5753,18 @@
       "minMechanism": "none",
       "coveredBy": [],
       "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:nextOpenDecision",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t351-decision-closer-parity.test.ts",
+          "mechanism": "none"
+        }
+      ],
+      "status": "covered"
     },
     {
       "unitClass": "function",
