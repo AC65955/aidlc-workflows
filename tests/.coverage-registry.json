@@ -20,9 +20,9 @@
     "render-surface": "tui"
   },
   "counts": {
-    "total": 1200,
+    "total": 1207,
     "enumeratedByClass": {
-      "function": 872,
+      "function": 879,
       "audit": 106,
       "scope": 11,
       "stage": 33,
@@ -31,7 +31,7 @@
       "render-surface": 7
     },
     "coveredByClass": {
-      "function": 536,
+      "function": 538,
       "audit": 67,
       "scope": 11,
       "stage": 11,
@@ -3833,6 +3833,13 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:GUARD_REMEDY_RECORD_WORK",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:guardAttemptState",
       "minMechanism": "none",
       "coveredBy": [
@@ -3862,6 +3869,18 @@
     {
       "unitClass": "function",
       "unitId": "function:guardOperationMatchesCommand",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t-guard-operation-contract.test.ts",
+          "mechanism": "none"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:guardOperationMatchesEngineArgs",
       "minMechanism": "none",
       "coveredBy": [
         {
@@ -3909,6 +3928,18 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:guardRecoveryAnswerAdmits",
+      "minMechanism": "none",
+      "coveredBy": [
+        {
+          "file": "tests/unit/t-guard-operation-contract.test.ts",
+          "mechanism": "none"
+        }
+      ],
+      "status": "covered"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:guardRecoveryAskForRefusal",
       "minMechanism": "none",
       "coveredBy": [
@@ -3937,6 +3968,13 @@
     },
     {
       "unitClass": "function",
+      "unitId": "function:guardRecoveryAskSelected",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
       "unitId": "function:guardRecoveryFeedbackStatus",
       "minMechanism": "none",
       "coveredBy": [
@@ -3950,6 +3988,20 @@
         }
       ],
       "status": "covered"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:guardRecoveryRecordWorkOpen",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:guardRecoverySelection",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
     },
     {
       "unitClass": "function",
@@ -5920,6 +5972,10 @@
       "unitId": "function:parseGuardRestartContinuationCommand",
       "minMechanism": "none",
       "coveredBy": [
+        {
+          "file": "tests/unit/t-guard-operation-contract.test.ts",
+          "mechanism": "none"
+        },
         {
           "file": "tests/unit/t265-plan-approval-guard.test.ts",
           "mechanism": "cli"
@@ -8707,6 +8763,13 @@
         }
       ],
       "status": "covered"
+    },
+    {
+      "unitClass": "function",
+      "unitId": "function:SKELETON_STANCES",
+      "minMechanism": "none",
+      "coveredBy": [],
+      "status": "UNCOVERED"
     },
     {
       "unitClass": "function",
